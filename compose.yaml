@@ -2,6 +2,7 @@ services:
   isaac-sim:
     image: nvcr.io/nvidia/isaac-sim:6.0.1
     container_name: isaac-sim-groot
+    user: "0:0"
     network_mode: host
     deploy:
       resources:
@@ -12,16 +13,15 @@ services:
               capabilities: [gpu]
     environment:
       - ACCEPT_EULA=Y
-      # WebRTC用のパブリックIP（起動スクリプトから注入）
       - PUBLIC_IP=${PUBLIC_IP}
     volumes:
-      # ホスト側のWorkspaceとコンテナ内を結合
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
+      # 【追加】ホスト側でS3と同期したlogsディレクトリをコンテナ内に共有
+      - ./logs:/workspace/g1-handover-project/logs
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
-    # エントリーポイントの後に実行されるデフォルトコマンド
     command: >
-      /workspace/isaac-sim/runheadless.sh
-      --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP}
-      --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100
-      --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998
+      /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
+      --task G1-Handover-v0
+      --num_envs 64
+      --headless
