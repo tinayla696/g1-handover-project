@@ -70,3 +70,9 @@ extra_javascript:
 # ナビゲーションメニューの設定
 nav:
   - Home: index.md
+  - インフラ構成:
+    - 概要: docs/infrastructure/overview.md
+    - AWSポート・S3同期設定: docs/infrastructure/aws_s3_setup.md
+  - 強化学習タスク設計:
+    - G1ロボット定義: docs/tasks/g1_robot.md
+    - 報酬関数と終了条件: docs/tasks/rewards_terminations.md
