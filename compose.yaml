@@ -1,5 +1,6 @@
 services:
-  isaac-sim:
+  isaac-sim-train:
+    profiles: ["train"]
     image: nvcr.io/nvidia/isaac-sim:6.0.1
     container_name: isaac-sim-groot
     user: "0:0"
@@ -24,4 +25,36 @@ services:
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
       --task G1-Handover-v0
       --num_envs 64
-      --headless
+      --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP}
+      --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100
+      --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998
+
+  isaac-sim-visual-check:
+    profiles: ["visual-check"]
+    image: nvcr.io/nvidia/isaac-sim:6.0.1
+    container_name: isaac-sim-groot
+    user: "0:0"
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - ACCEPT_EULA=Y
+      - PUBLIC_IP=${PUBLIC_IP}
+    volumes:
+      - ../IsaacLab:/workspace/IsaacLab
+      - .:/workspace/g1-handover-project
+      # 【追加】ホスト側でS3と同期したlogsディレクトリをコンテナ内に共有
+      - ./logs:/workspace/g1-handover-project/logs
+    entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
+    command: >
+      /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/tasks/visual_check.py
+      --task G1-Handover-v0
+      --num_envs 1
+      --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP}
+      --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100
+      --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998

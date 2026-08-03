@@ -11,7 +11,7 @@ parser.add_argument("--seed", type=int, default=42, help="Seed for the experimen
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
-# アプリケーションの起動 (Headlessモード等を有効化)
+# アプリケーションの起動
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -38,7 +38,7 @@ def main():
     env_cfg.scene.num_envs = args_cli.num_envs
     
     # 環境の生成
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.headless else "human")
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
     
     # RSL-RL ランナーの設定と実行
     runner_cfg_entry_point = gym.spec(args_cli.task).kwargs.get("rsl_rl_cfg_entry_point")

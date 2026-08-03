@@ -68,7 +68,7 @@ class G1HandoverActionsCfg:
     joint_pos = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[".*"],
-        scale=0.25,
+        scale=0.05,
         use_default_offset=True,
     )
 
@@ -80,7 +80,7 @@ class G1HandoverTerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     robot_fall = DoneTerm(
         func=mdp.root_height_below_minimum,
-        params={"minimum_height": 0.45, "asset_cfg": SceneEntityCfg("robot")},
+        params={"minimum_height": 0.3, "asset_cfg": SceneEntityCfg("robot")},
     )
 
 @configclass
