@@ -22,6 +22,7 @@ import tasks
 def main():
     env_cfg = gym.spec(args_cli.task).kwargs.get("cfg")
     env_cfg.scene.num_envs = 1
+    env_cfg.seed = args_cli.seed
 
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
     env.reset(seed=args_cli.seed)
@@ -37,7 +38,7 @@ def main():
             if (step + 1) % 60 == 0:
                 print(f"  step {step + 1}/{args_cli.steps}")
             if terminated.any().item() or truncated.any().item():
-                env.reset()
+                env.reset(seed=args_cli.seed)
     finally:
         env.close()
 

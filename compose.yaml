@@ -25,9 +25,7 @@ services:
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
       --task G1-Handover-v0
       --num_envs 64
-      --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP}
-      --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100
-      --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998
+      --kit_args "--/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998"
 
   isaac-sim-visual-check:
     profiles: ["visual-check"]
@@ -55,6 +53,4 @@ services:
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/tasks/visual_check.py
       --task G1-Handover-v0
       --num_envs 1
-      --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP}
-      --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100
-      --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998
+      --kit_args "--/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998"

@@ -36,6 +36,7 @@ class RslRlRewardCompatWrapper(RslRlVecEnvWrapper):
 def main():
     env_cfg = gym.spec(args_cli.task).kwargs.get("cfg")
     env_cfg.scene.num_envs = args_cli.num_envs
+    env_cfg.seed = args_cli.seed
     
     # 環境の生成
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
@@ -43,6 +44,8 @@ def main():
     # RSL-RL ランナーの設定と実行
     runner_cfg_entry_point = gym.spec(args_cli.task).kwargs.get("rsl_rl_cfg_entry_point")
     runner_cfg = string_to_callable(runner_cfg_entry_point)()
+    if hasattr(runner_cfg, "seed"):
+        runner_cfg.seed = args_cli.seed
     runner_cfg = handle_deprecated_rsl_rl_cfg(runner_cfg, metadata.version("rsl-rl-lib"))
     runner_cfg_dict = runner_cfg.to_dict()
     env = RslRlRewardCompatWrapper(env, clip_actions=runner_cfg.clip_actions)

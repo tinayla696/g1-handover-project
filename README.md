@@ -17,29 +17,29 @@ Unitree G1 ヒューマノイドロボットを用いた、ノベルティハン
 AWSのキャパシティ不足を回避するため、コードと学習成果物、シミュレーション映像の経路を完全に分離・ポータブル化しています。
 
 ```mermaid
-graph TD
-    subgraph Local PC
-        Client[Isaac Sim WebRTC Client 2.0.0]
+flowchart TD
+    subgraph local_pc["Local PC"]
+        client["Isaac Sim WebRTC Client 2.0.0"]
     end
 
-    subgraph AWS EC2 Instance (g7e / g5 / g6)
-        Host[Host OS / run_env.sh]
-        Docker[Docker Compose / Container]
-        Logs[./logs / Checkpoints]
+    subgraph aws_ec2["AWS EC2 Instance (g7e / g5 / g6)"]
+        host["Host OS / run_env.sh"]
+        docker["Docker Compose / Container"]
+        logs["./logs / Checkpoints"]
     end
 
-    subgraph Remote Infrastructure
-        GitHub[GitHub Repo]
-        S3[AWS S3 Bucket]
+    subgraph remote["Remote Infrastructure"]
+        github["GitHub Repo"]
+        s3["AWS S3 Bucket"]
     end
 
     %% ワークフローの流れ
-    GitHub -->|1. git clone / pull| Host
-    S3 -->|2. aws s3 sync latest| Logs
-    Host -->|3. compose up| Docker
-    Docker -->|4. Train Loop 1000 iter| Logs
-    Docker -.->|5. WebRTC Stream / TCP:49100, UDP:47998| Client
-    Logs -->|6. aws s3 sync archive| S3
+    github -->|1. git clone / pull| host
+    s3 -->|2. aws s3 sync latest| logs
+    host -->|3. compose up| docker
+    docker -->|4. Train Loop 1000 iter| logs
+    docker -.->|5. WebRTC Stream / TCP:49100, UDP:47998| client
+    logs -->|6. aws s3 sync archive| s3
 ```
 
 ## 🚀 Quick Start

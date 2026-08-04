@@ -17,3 +17,31 @@ Isaac Lab のデフォルトの全部入りインストール（`--install`）�
 | **isaaclab_teleop** | `websockets` | `websockets >= 14` | **禁止** (自動学習のため不要) |
 
 このため、`scripts/container_entrypoint.sh` ではこれらを排除し、`omni.isaac.lab`、`omni.isaac.lab_assets`、`omni.isaac.lab_rl` の**最小セットのみをピンポイントでインストール**する構成をとっています。これにより、環境は `torch 2.10.0+cu128` レールに固定され、安定動作します。
+
+## 🧾 実行ログ運用（非致命Warningの扱い）
+
+Isaac Sim 6.0.1 の visual check / train 実行時には、終了コードが `0` でも以下の Warning が出る場合があります。これらは本プロジェクトでは**既知のノイズ**として扱います。
+
+| ログ断片 | 主な意味 | 判定 | 対応方針 |
+| :--- | :--- | :--- | :--- |
+| `OmniHub ... failed to launch ... retry` | OmniHub の補助プロセス再接続 | 非致命 | 終了コードとステップ完走を優先して判定 |
+| `failed to open the default display` | コンテナ側でX表示を検証できない | 非致命 | headless/ストリーミング運用では許容 |
+| `Enable omni.materialx.libs extension...` | MaterialX拡張の案内 | 非致命 | MaterialXを使わない限り無視可 |
+| `TGS solver ... noisy velocities` | 物理ソルバ設定に関する注意 | 注意 | 学習安定性を見て必要時のみ調整 |
+| `Seed not set for the environment` | 環境seed未設定 | 改善対象 | `src/train.py` と `src/tasks/visual_check.py` で seed を明示設定 |
+
+### ✅ 成功判定の基準
+
+以下を満たす場合は、Warning が残っていても実行成功とみなします。
+
+* コンテナの終了コードが `0`
+* visual check が指定ステップ（例: `600/600`）まで完走
+* `SimulationContext cleared` まで到達
+
+### 🚨 失敗として扱う条件
+
+次のいずれかに該当する場合は、即時にエラー調査を優先してください。
+
+* `There was an error running python` が出る
+* コンテナ終了コードが `0` 以外
+* 引数エラー（`unrecognized arguments`）や import エラーで途中停止する
