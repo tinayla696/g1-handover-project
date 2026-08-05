@@ -22,6 +22,18 @@ class G1HandoverSceneCfg(InteractiveSceneCfg):
     ground = AssetBaseCfg(prim_path="/World/GroundPlane", spawn=sim_utils.GroundPlaneCfg())
     # ロボット (Unitree G1)
     robot = G1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+
+    # 手渡し用の机（静的）
+    table = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/Table",
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.65, 0.0, 0.35), rot=(1.0, 0.0, 0.0, 0.0)),
+        spawn=sim_utils.CuboidCfg(
+            size=(0.8, 0.6, 0.7),
+            rigid_props=RigidBodyPropertiesCfg(kinematic_enabled=True, disable_gravity=True),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.55, 0.35, 0.2)),
+        ),
+    )
     
     # ノベルティ（500mlペットボトルを模した円柱）
     novelty = RigidObjectCfg(

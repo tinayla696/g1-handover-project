@@ -59,3 +59,5 @@ docs/memo.md
 
 # 学習成果物（S3で管理するため除外）
 logs/
+data/
+*.etli

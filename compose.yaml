@@ -15,16 +15,18 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - PUBLIC_IP=${PUBLIC_IP}
+      - TASK_ID=${TASK_ID:-g1_handover_base}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
       # 【追加】ホスト側でS3と同期したlogsディレクトリをコンテナ内に共有
-      - ./logs:/workspace/g1-handover-project/logs
+      - ./logs/${TASK_ID:-g1_handover_base}:/workspace/g1-handover-project/logs
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
       --task G1-Handover-v0
       --num_envs 64
+      --livestream 2
       --kit_args "--/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998"
 
   isaac-sim-visual-check:
@@ -43,14 +45,17 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - PUBLIC_IP=${PUBLIC_IP}
+      - TASK_ID=${TASK_ID:-g1_handover_base}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
       # 【追加】ホスト側でS3と同期したlogsディレクトリをコンテナ内に共有
-      - ./logs:/workspace/g1-handover-project/logs
+      - ./logs/${TASK_ID:-g1_handover_base}:/workspace/g1-handover-project/logs
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/tasks/visual_check.py
       --task G1-Handover-v0
       --num_envs 1
-      --kit_args "--/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998"
+      --steps ${VISUAL_CHECK_STEPS:-7200}
+      --livestream 2
+      --kit_args "--/app/window/width=1280 --/app/window/height=720 --/exts/omni.kit.livestream.app/primaryStream/streamType=webrtc --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=30 --/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=false"
