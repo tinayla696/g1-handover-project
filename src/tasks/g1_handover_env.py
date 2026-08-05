@@ -1,5 +1,12 @@
+import os
+from pathlib import Path
+
+import numpy as np
+import torch
+from scipy.interpolate import interp1d
+
 import isaaclab.envs.mdp as mdp
-from isaaclab.envs import ManagerBasedRLEnvCfg
+from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -14,6 +21,103 @@ from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 from isaaclab.sim import RigidBodyPropertiesCfg
 
 import isaaclab.sim as sim_utils
+
+
+MOTION_DIR = Path(os.getenv("MOTION_DIR", "data/motions/HandOver7"))
+CONTROL_DT = 0.02
+
+
+class MotionBufferManager:
+    """Load HandOver7 and resample it to the policy control frequency."""
+
+    _buffer: torch.Tensor | None = None
+
+    @classmethod
+    def get_buffer(cls, motion_dir: Path = MOTION_DIR, control_dt: float = CONTROL_DT) -> torch.Tensor:
+        if cls._buffer is not None:
+            return cls._buffer
+
+        npz_path = motion_dir / "HandOver7_unitree_g1.npz"
+        if not npz_path.exists():
+            npz_path = motion_dir / "HandOver7.npz"
+
+        if not npz_path.exists():
+            print(f"[WARN] Motion file not found at {npz_path}. Using zero buffer fallback.")
+            cls._buffer = torch.zeros((400, 29), dtype=torch.float32)
+            return cls._buffer
+
+        payload = np.load(npz_path, allow_pickle=True)
+        if "fps" in payload:
+            fps = float(np.asarray(payload["fps"]).item())
+        else:
+            fps = 30.0
+
+        candidate_keys = ("joint_positions", "joint_pos", "joint_position", "qpos", "positions")
+        joints = None
+        for key in candidate_keys:
+            if key in payload:
+                joints = np.asarray(payload[key], dtype=np.float32)
+                break
+
+        if joints is None:
+            if len(payload.files) == 1:
+                joints = np.asarray(payload[payload.files[0]], dtype=np.float32)
+            else:
+                raise ValueError(f"Unknown motion format in {npz_path}; available keys: {payload.files}")
+
+        if joints.ndim == 1:
+            joints = joints[None, :]
+        if joints.ndim > 2:
+            joints = joints.reshape(joints.shape[0], -1)
+
+        num_frames = joints.shape[0]
+        duration = max((num_frames - 1) / max(fps, 1e-6), control_dt)
+        t_orig = np.linspace(0.0, duration, num_frames)
+        t_target = np.arange(0.0, duration + 1e-9, control_dt)
+
+        interp_fn = interp1d(t_orig, joints, kind="linear", axis=0, fill_value="edge", bounds_error=False)
+        resampled = interp_fn(t_target)
+
+        cls._buffer = torch.tensor(resampled, dtype=torch.float32)
+        print(f"✓ [MotionBuffer] Resampled HandOver7 to {1.0 / control_dt:.1f}Hz: {tuple(cls._buffer.shape)}")
+        return cls._buffer
+
+
+def motion_tracking_reward(
+    env: ManagerBasedRLEnv, std: float = 0.5, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Exponential joint-tracking reward against the resampled HandOver7 trajectory."""
+
+    motion_buffer = MotionBufferManager.get_buffer()
+    robot = env.scene[asset_cfg.name]
+    current_joint_pos = robot.data.joint_pos.torch
+
+    step_ids = env.episode_length_buf.long().clamp(max=motion_buffer.shape[0] - 1)
+    target_pos = motion_buffer[step_ids].to(current_joint_pos.device)
+    target_pos = target_pos[:, : current_joint_pos.shape[-1]]
+
+    joint_err = torch.sum(torch.square(current_joint_pos - target_pos), dim=-1)
+    return torch.exp(-joint_err / (std**2))
+
+
+def object_approach_reward(
+    env: ManagerBasedRLEnv,
+    std: float = 0.3,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("novelty"),
+) -> torch.Tensor:
+    """Reward the robot for approaching the novelty object and keeping it near the handover zone."""
+
+    robot = env.scene[robot_cfg.name]
+    novelty = env.scene[object_cfg.name]
+
+    robot_pos = robot.data.root_pos_w.torch
+    object_pos = novelty.data.root_pos_w.torch
+    target_pos = torch.tensor((0.88, 0.0, 1.02), dtype=object_pos.dtype, device=object_pos.device)
+
+    approach_error = torch.linalg.norm(robot_pos - object_pos, dim=-1)
+    handover_error = torch.linalg.norm(object_pos - target_pos, dim=-1)
+    return torch.exp(-approach_error / std) + 0.5 * torch.exp(-handover_error / (std * 1.5))
 
 @configclass
 class G1HandoverSceneCfg(InteractiveSceneCfg):
@@ -67,10 +171,17 @@ class G1HandoverObservationCfg:
 @configclass
 class G1HandoverRewardsCfg:
     """ハンドオーバーを成功させるための報酬設計"""
-    # 転倒ペナルティ（ロボットの体幹が直立しているか）
+    alive = RewTerm(func=mdp.is_alive, weight=1.0)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5, params={"asset_cfg": SceneEntityCfg("robot")})
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-2)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
+    motion_tracking = RewTerm(func=motion_tracking_reward, weight=5.0, params={"std": 0.5})
+    object_approach = RewTerm(
+        func=object_approach_reward,
+        weight=2.0,
+        params={"std": 0.3, "robot_cfg": SceneEntityCfg("robot"), "object_cfg": SceneEntityCfg("novelty")},
+    )
 
 
 @configclass
@@ -110,7 +221,19 @@ class G1HandoverEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 0.005  # 200Hz
         self.decimation = 4   # ポリシーは50Hzで制御
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 8.0
+        self.episode_length_s = 6.0
+
+        try:
+            robot_joint_names = list(self.scene.robot.joint_names)
+            motion_buffer = MotionBufferManager.get_buffer()
+            first_frame = motion_buffer[0, : len(robot_joint_names)].tolist()
+            if hasattr(self.scene.robot, "init_state"):
+                if hasattr(self.scene.robot.init_state, "joint_pos"):
+                    self.scene.robot.init_state.joint_pos = tuple(float(v) for v in first_frame)
+                if hasattr(self.scene.robot.init_state, "joint_vel"):
+                    self.scene.robot.init_state.joint_vel = tuple(0.0 for _ in first_frame)
+        except Exception as exc:
+            print(f"[WARN] Motion-based initial pose skipped: {exc}")
 
 # --- PPO (強化学習アルゴリズム) のハイパーパラメータ設定 ---
 from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
@@ -118,19 +241,19 @@ from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPp
 @configclass
 class G1HandoverPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 1000  # テスト用にイテレーションを設定
+    max_iterations = 1500  # ティーチャー学習用の長め設定
     save_interval = 50
-    experiment_name = "g1_handover"
+    experiment_name = "g1_handover_teacher"
     empirical_normalization = False
 
     actor = RslRlMLPModelCfg(
-        hidden_dims=[400, 300, 200],
+        hidden_dims=[512, 256, 128],
         activation="elu",
         obs_normalization=True,
-        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=1.0),
+        distribution_cfg=RslRlMLPModelCfg.GaussianDistributionCfg(init_std=0.8),
     )
     critic = RslRlMLPModelCfg(
-        hidden_dims=[400, 300, 200],
+        hidden_dims=[512, 256, 128],
         activation="elu",
         obs_normalization=True,
     )
@@ -138,10 +261,10 @@ class G1HandoverPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.01,
+        entropy_coef=0.005,
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=1e-3,
+        learning_rate=5e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
