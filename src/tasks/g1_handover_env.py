@@ -26,6 +26,104 @@ import isaaclab.sim as sim_utils
 MOTION_DIR = Path(os.getenv("MOTION_DIR", "data/motions/HandOver7"))
 CONTROL_DT = 0.02
 
+ACTUATED_JOINT_NAMES = [
+    "left_hip_pitch_joint",
+    "right_hip_pitch_joint",
+    "torso_joint",
+    "left_hip_roll_joint",
+    "right_hip_roll_joint",
+    "left_shoulder_pitch_joint",
+    "right_shoulder_pitch_joint",
+    "left_hip_yaw_joint",
+    "right_hip_yaw_joint",
+    "left_shoulder_roll_joint",
+    "right_shoulder_roll_joint",
+    "left_knee_joint",
+    "right_knee_joint",
+    "left_shoulder_yaw_joint",
+    "right_shoulder_yaw_joint",
+    "left_ankle_pitch_joint",
+    "right_ankle_pitch_joint",
+    "left_elbow_pitch_joint",
+    "right_elbow_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_ankle_roll_joint",
+    "left_elbow_roll_joint",
+    "right_elbow_roll_joint",
+    "left_five_joint",
+    "left_three_joint",
+    "left_zero_joint",
+    "right_five_joint",
+    "right_three_joint",
+    "right_zero_joint",
+    "left_six_joint",
+    "left_four_joint",
+    "left_one_joint",
+    "right_six_joint",
+    "right_four_joint",
+    "right_one_joint",
+    "left_two_joint",
+    "right_two_joint",
+]
+
+MOTION_INIT_JOINT_LIMITS = {
+    "left_hip_pitch_joint": (-2.35, 3.05),
+    "right_hip_pitch_joint": (-2.35, 3.05),
+    "torso_joint": (-2.618, 2.618),
+    "left_hip_roll_joint": (-0.260, 2.530),
+    "right_hip_roll_joint": (-2.530, 0.260),
+    "left_shoulder_pitch_joint": (-2.967, 2.792),
+    "right_shoulder_pitch_joint": (-2.967, 2.792),
+    "left_hip_yaw_joint": (-2.750, 2.750),
+    "right_hip_yaw_joint": (-2.750, 2.750),
+    "left_shoulder_roll_joint": (-1.588, 2.251),
+    "right_shoulder_roll_joint": (-2.251, 1.588),
+    "left_knee_joint": (-0.335, 2.545),
+    "right_knee_joint": (-0.335, 2.545),
+    "left_shoulder_yaw_joint": (-2.618, 2.618),
+    "right_shoulder_yaw_joint": (-2.618, 2.618),
+    "left_ankle_pitch_joint": (-0.680, 0.730),
+    "right_ankle_pitch_joint": (-0.680, 0.730),
+    "left_elbow_pitch_joint": (-0.227, 3.421),
+    "right_elbow_pitch_joint": (-0.227, 3.421),
+    "left_ankle_roll_joint": (-0.552, 0.552),
+    "right_ankle_roll_joint": (-0.552, 0.552),
+    "left_elbow_roll_joint": (-1.745, 1.745),
+    "right_elbow_roll_joint": (-1.745, 1.745),
+    "left_five_joint": (0.0, 1.840),
+    "left_three_joint": (0.0, 1.840),
+    "left_zero_joint": (0.0, 1.840),
+    "right_five_joint": (0.0, 1.840),
+    "right_three_joint": (0.0, 1.840),
+    "right_zero_joint": (0.0, 1.840),
+    "left_six_joint": (0.0, 1.840),
+    "left_four_joint": (0.0, 1.840),
+    "left_one_joint": (0.0, 1.840),
+    "right_six_joint": (0.0, 1.840),
+    "right_four_joint": (0.0, 1.840),
+    "right_one_joint": (0.0, 1.840),
+    "left_two_joint": (0.0, 1.840),
+    "right_two_joint": (0.0, 1.840),
+}
+
+MOTION_INIT_EXCLUDED_JOINTS = {
+    "left_elbow_pitch_joint",
+    "right_elbow_pitch_joint",
+    "left_five_joint",
+    "left_three_joint",
+    "left_zero_joint",
+    "right_five_joint",
+    "right_three_joint",
+    "right_zero_joint",
+    "left_six_joint",
+    "left_four_joint",
+    "left_one_joint",
+    "right_six_joint",
+    "right_four_joint",
+    "right_one_joint",
+    "left_two_joint",
+    "right_two_joint",
+}
 
 class MotionBufferManager:
     """Load HandOver7 and resample it to the policy control frequency."""
@@ -83,6 +181,21 @@ class MotionBufferManager:
         return cls._buffer
 
 
+def _project_motion_initial_pose(motion_frame: torch.Tensor) -> dict[str, float]:
+    eps = 1e-3
+    joint_pos: dict[str, float] = {}
+    for joint_name, value in zip(ACTUATED_JOINT_NAMES, motion_frame[: len(ACTUATED_JOINT_NAMES)].tolist()):
+        if joint_name in MOTION_INIT_EXCLUDED_JOINTS:
+            continue
+        lower, upper = MOTION_INIT_JOINT_LIMITS[joint_name]
+        safe_lower = lower + eps
+        safe_upper = upper - eps
+        if safe_lower >= safe_upper:
+            safe_lower, safe_upper = lower, upper
+        joint_pos[joint_name] = float(np.clip(value, safe_lower, safe_upper))
+    return joint_pos
+
+
 def motion_tracking_reward(
     env: ManagerBasedRLEnv, std: float = 0.5, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -92,7 +205,7 @@ def motion_tracking_reward(
     robot = env.scene[asset_cfg.name]
     current_joint_pos = robot.data.joint_pos.torch
 
-    step_ids = env.episode_length_buf.long().clamp(max=motion_buffer.shape[0] - 1)
+    step_ids = env.episode_length_buf.long().cpu().clamp(max=motion_buffer.shape[0] - 1)
     target_pos = motion_buffer[step_ids].to(current_joint_pos.device)
     target_pos = target_pos[:, : current_joint_pos.shape[-1]]
 
@@ -122,6 +235,11 @@ def object_approach_reward(
 @configclass
 class G1HandoverSceneCfg(InteractiveSceneCfg):
     """シミュレーションステージ上の配置定義"""
+    # 全体を明るくする環境光
+    dome_light = AssetBaseCfg(
+        prim_path="/World/DomeLight",
+        spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(1.0, 1.0, 1.0)),
+    )
     # 地面
     ground = AssetBaseCfg(prim_path="/World/GroundPlane", spawn=sim_utils.GroundPlaneCfg())
     # ロボット (Unitree G1)
@@ -224,14 +342,12 @@ class G1HandoverEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 6.0
 
         try:
-            robot_joint_names = list(self.scene.robot.joint_names)
             motion_buffer = MotionBufferManager.get_buffer()
-            first_frame = motion_buffer[0, : len(robot_joint_names)].tolist()
             if hasattr(self.scene.robot, "init_state"):
                 if hasattr(self.scene.robot.init_state, "joint_pos"):
-                    self.scene.robot.init_state.joint_pos = tuple(float(v) for v in first_frame)
+                    self.scene.robot.init_state.joint_pos = _project_motion_initial_pose(motion_buffer[0])
                 if hasattr(self.scene.robot.init_state, "joint_vel"):
-                    self.scene.robot.init_state.joint_vel = tuple(0.0 for _ in first_frame)
+                    self.scene.robot.init_state.joint_vel = {joint_name: 0.0 for joint_name in ACTUATED_JOINT_NAMES}
         except Exception as exc:
             print(f"[WARN] Motion-based initial pose skipped: {exc}")
 

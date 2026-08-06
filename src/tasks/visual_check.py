@@ -29,7 +29,9 @@ def main():
     if hasattr(env_cfg, "experiment_name"):
         env_cfg.experiment_name = TASK_ID
 
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array")
+    # Isaac Lab environments return torch tensors by design.
+    # Disable Gymnasium passive checker to avoid non-actionable warnings during visual checks.
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array", disable_env_checker=True)
     env.reset(seed=args_cli.seed)
 
     action_dim = int(env.action_space.shape[-1])

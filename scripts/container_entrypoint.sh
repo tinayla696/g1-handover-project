@@ -11,7 +11,15 @@ cat << 'EOF' > /tmp/bin/python3
 exec /isaac-sim/python.sh "$@"
 EOF
 
+# Headless container shim: some optional UI code paths try to invoke zenity.
+# Return non-zero to indicate "dialog unavailable" without noisy "not found" logs.
+cat << 'EOF' > /tmp/bin/zenity
+#!/bin/bash
+exit 1
+EOF
+
 chmod +x /tmp/bin/python3
+chmod +x /tmp/bin/zenity
 
 export PATH="/tmp/bin:$PATH"
 

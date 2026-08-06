@@ -75,6 +75,17 @@ chmod +x run_env.sh
 2. Server 欄に EC2 の `パブリックIPアドレスのみ` を入力（※ポート番号は入力しない）。
 3. **Connect** をクリックして画面が展開することを確認。
 
+### 4. 最終チェックポイントのループ再生
+
+学習後の最終チェックポイントを目視確認したい場合は、学習ランチャーとは別に以下を使います。
+
+```bash
+chmod +x scripts/run_playback.sh
+./scripts/run_playback.sh g1_handover_teacher
+```
+
+このランチャーは `logs/<task_id>/` 配下から最新の `model_*.pt` を選び、ローカルに見つからない場合のみ S3 の `checkpoints/<task_id>/latest/` を同期してから WebRTC 付きでループ再生します。
+
 
 ## 🛠 開発ルール (Docs as Code)
 
