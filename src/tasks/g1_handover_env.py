@@ -362,7 +362,7 @@ class G1HandoverRewardsCfg:
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-2)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
-    motion_tracking = RewTerm(func=motion_tracking_reward, weight=3.0, params={"std": 0.5})
+    motion_tracking = RewTerm(func=motion_tracking_reward, weight=3.0, params={"std": 2.0})
     object_approach = RewTerm(
         func=object_approach_reward,
         weight=1.0,
