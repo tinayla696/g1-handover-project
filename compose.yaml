@@ -80,6 +80,9 @@ services:
       - TASK_ID=${TASK_ID:-g1_handover_base}
       - PLAYBACK_CHECKPOINT=${PLAYBACK_CHECKPOINT}
       - PLAYBACK_MODE=${PLAYBACK_MODE:-policy}
+      # WebRTC のエンコーダ制御
+      - NVST_BITRATE=4000  # ビットレート制限 (kbps)
+      - NVST_FRAMERATE=15  # フレームレート制限 (fps)
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
@@ -94,4 +97,37 @@ services:
       --loop
       --livestream 2
       --enable_cameras
-      --kit_args "--/app/window/width=1920 --/app/window/height=1080 --/exts/omni.kit.livestream.app/primaryStream/streamType=webrtc --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=30 --/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=true"
+      --kit_args "--/app/window/width=1280 --/app/window/height=720 --/exts/omni.kit.livestream.app/primaryStream/streamType=webrtc --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=15 --/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=true --/exts/omni.kit.livestream.app/primaryStream/maxBitrate=4000"
+
+  isaac-sim-kinematic:
+    profiles: ["kinematic-replay"]
+    image: nvcr.io/nvidia/isaac-sim:6.0.1
+    container_name: isaac-sim-groot
+    user: "0:0"
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - ACCEPT_EULA=Y
+      - PUBLIC_IP=${PUBLIC_IP}
+      - TASK_ID=${TASK_ID:-g1_handover_base}
+      - MOTION_DIR=/workspace/g1-handover-project/data/motions/HandOver7
+    volumes:
+      - ../IsaacLab:/workspace/IsaacLab
+      - .:/workspace/g1-handover-project
+    entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
+    command: >
+      /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/tasks/motion_replay.py
+      --task G1-Handover-v0
+      --num_envs 1
+      --motion_dir /workspace/g1-handover-project/data/motions/HandOver7
+      --fps 50
+      --loop
+      --livestream 2
+      --enable_cameras
+      --kit_args "--/app/window/width=1280 --/app/window/height=720 --/exts/omni.kit.livestream.app/primaryStream/streamType=webrtc --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=15 --/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=true --/exts/omni.kit.livestream.app/primaryStream/maxBitrate=4000"

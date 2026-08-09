@@ -339,17 +339,13 @@ class G1HandoverEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 0.005  # 200Hz
         self.decimation = 4   # ポリシーは50Hzで制御
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 12.0  # HandOver7は9.98秒、余裕を持たせる
+        self.episode_length_s = 20.0  # HandOver7は9.98秒、余裕をもたせる
 
+        # G1デフォルト立位姿勢で初期化（ランダムポリシーによる即時転倒を防ぐ）
         try:
-            motion_buffer = MotionBufferManager.get_buffer()
-            if hasattr(self.scene.robot, "init_state"):
-                if hasattr(self.scene.robot.init_state, "joint_pos"):
-                    self.scene.robot.init_state.joint_pos = _project_motion_initial_pose(motion_buffer[0])
-                if hasattr(self.scene.robot.init_state, "joint_vel"):
-                    self.scene.robot.init_state.joint_vel = {joint_name: 0.0 for joint_name in ACTUATED_JOINT_NAMES}
+            MotionBufferManager.get_buffer()
         except Exception as exc:
-            print(f"[WARN] Motion-based initial pose skipped: {exc}")
+            print(f"[WARN] Motion buffer preload skipped: {exc}")
 
 # --- PPO (強化学習アルゴリズム) のハイパーパラメータ設定 ---
 from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
