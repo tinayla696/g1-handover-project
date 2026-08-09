@@ -252,7 +252,9 @@ def motion_tracking_reward(
     motion_buffer = MotionBufferManager.get_buffer()
     robot = env.scene[asset_cfg.name]
     current_joint_pos = robot.data.joint_pos
-    device = current_joint_pos.device
+    # env.device is a string ("cuda:0") — safe for torch .to()
+    device: str = env.device
+    current_joint_pos = robot.data.joint_pos
     n_robot = current_joint_pos.shape[-1]
 
     # Build column-index mapping on first call
