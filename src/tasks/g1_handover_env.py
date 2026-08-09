@@ -129,6 +129,7 @@ class MotionBufferManager:
     """Load HandOver7 and resample it to the policy control frequency."""
 
     _buffer: torch.Tensor | None = None
+    _joint_names: list[str] | None = None  # HandOver7 joint names from NPZ
 
     @classmethod
     def get_buffer(cls, motion_dir: Path = MOTION_DIR, control_dt: float = CONTROL_DT) -> torch.Tensor:
@@ -149,6 +150,9 @@ class MotionBufferManager:
             fps = float(np.asarray(payload["fps"]).item())
         else:
             fps = 30.0
+
+        if "joint_names" in payload:
+            cls._joint_names = [str(n) for n in np.asarray(payload["joint_names"]).tolist()]
 
         candidate_keys = ("joint_positions", "joint_pos", "joint_position", "qpos", "positions")
         joints = None
@@ -177,7 +181,7 @@ class MotionBufferManager:
         resampled = interp_fn(t_target)
 
         cls._buffer = torch.tensor(resampled, dtype=torch.float32)
-        print(f"✓ [MotionBuffer] Resampled HandOver7 to {1.0 / control_dt:.1f}Hz: {tuple(cls._buffer.shape)}")
+        print(f"✓ [MotionBuffer] Resampled HandOver7 to {1.0 / control_dt:.1f}Hz: {tuple(cls._buffer.shape)}, joint_names: {len(cls._joint_names) if cls._joint_names else 'N/A'}")
         return cls._buffer
 
 
@@ -196,18 +200,79 @@ def _project_motion_initial_pose(motion_frame: torch.Tensor) -> dict[str, float]
     return joint_pos
 
 
+# HandOver7→G1 joint name alias (matches checkpoint_playback.py / motion_replay.py)
+_HANDOVER7_ALIAS: dict[str, str] = {
+    "torso_joint": "waist_pitch_joint",
+    "left_elbow_pitch_joint": "left_elbow_joint",
+    "right_elbow_pitch_joint": "right_elbow_joint",
+    "left_elbow_roll_joint": "left_wrist_roll_joint",
+    "right_elbow_roll_joint": "right_wrist_roll_joint",
+    "left_zero_joint": "left_hand_thumb_0_joint",
+    "left_one_joint": "left_hand_thumb_1_joint",
+    "left_two_joint": "left_hand_thumb_2_joint",
+    "left_three_joint": "left_hand_index_0_joint",
+    "left_four_joint": "left_hand_index_1_joint",
+    "left_five_joint": "left_hand_middle_0_joint",
+    "left_six_joint": "left_hand_middle_1_joint",
+    "right_zero_joint": "right_hand_thumb_0_joint",
+    "right_one_joint": "right_hand_thumb_1_joint",
+    "right_two_joint": "right_hand_thumb_2_joint",
+    "right_three_joint": "right_hand_index_0_joint",
+    "right_four_joint": "right_hand_index_1_joint",
+    "right_five_joint": "right_hand_middle_0_joint",
+    "right_six_joint": "right_hand_middle_1_joint",
+}
+
+# Cache: G1 joint index → HandOver7 source column index (-1 = unmapped)
+_motion_col_indices: list[int] | None = None
+
+
+def _build_motion_col_indices(robot_joint_names: list[str], motion_joint_names: list[str]) -> list[int]:
+    """Build G1→HandOver7 column index map once and cache it."""
+    src = {name: i for i, name in enumerate(motion_joint_names)}
+    indices: list[int] = []
+    mapped = 0
+    for rname in robot_joint_names:
+        src_name = rname if rname in src else _HANDOVER7_ALIAS.get(rname)
+        if src_name and src_name in src:
+            indices.append(src[src_name])
+            mapped += 1
+        else:
+            indices.append(-1)
+    print(f"[motion_tracking_reward] Mapped {mapped}/{len(robot_joint_names)} G1 joints to HandOver7", flush=True)
+    return indices
+
+
 def motion_tracking_reward(
     env: ManagerBasedRLEnv, std: float = 0.5, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     """Exponential joint-tracking reward against the resampled HandOver7 trajectory."""
+    global _motion_col_indices
 
     motion_buffer = MotionBufferManager.get_buffer()
     robot = env.scene[asset_cfg.name]
-    current_joint_pos = robot.data.joint_pos.torch
+    current_joint_pos = robot.data.joint_pos
+    device = current_joint_pos.device
+    n_robot = current_joint_pos.shape[-1]
+
+    # Build column-index mapping on first call
+    if _motion_col_indices is None:
+        robot_joint_names = list(robot.joint_names) if hasattr(robot, "joint_names") else ACTUATED_JOINT_NAMES
+        # HandOver7 NPZ joint_names are stored in MotionBufferManager payload; fall back to ACTUATED_JOINT_NAMES
+        motion_joint_names_raw = getattr(MotionBufferManager, "_joint_names", None)
+        if motion_joint_names_raw is None:
+            # No name info → skip tracking (return 0)
+            return torch.zeros(current_joint_pos.shape[0], device=device)
+        _motion_col_indices = _build_motion_col_indices(robot_joint_names[:n_robot], motion_joint_names_raw)
 
     step_ids = env.episode_length_buf.long().cpu().clamp(max=motion_buffer.shape[0] - 1)
-    target_pos = motion_buffer[step_ids].to(current_joint_pos.device)
-    target_pos = target_pos[:, : current_joint_pos.shape[-1]]
+    motion_frame = motion_buffer[step_ids].to(device)  # (envs, 43)
+
+    # Remap motion columns to G1 joint order
+    target_pos = current_joint_pos.clone()
+    for g1_idx, src_idx in enumerate(_motion_col_indices):
+        if src_idx >= 0 and g1_idx < n_robot:
+            target_pos[:, g1_idx] = motion_frame[:, src_idx]
 
     joint_err = torch.sum(torch.square(current_joint_pos - target_pos), dim=-1)
     return torch.exp(-joint_err / (std**2))
@@ -289,15 +354,16 @@ class G1HandoverObservationCfg:
 @configclass
 class G1HandoverRewardsCfg:
     """ハンドオーバーを成功させるための報酬設計"""
-    alive = RewTerm(func=mdp.is_alive, weight=1.0)
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.5, params={"asset_cfg": SceneEntityCfg("robot")})
+    # Phase 1: 生存優先。motion_tracking は joint mapping 修正済みで有効化
+    alive = RewTerm(func=mdp.is_alive, weight=2.0)
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0, params={"asset_cfg": SceneEntityCfg("robot")})
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-2)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4, params={"asset_cfg": SceneEntityCfg("robot")})
-    motion_tracking = RewTerm(func=motion_tracking_reward, weight=5.0, params={"std": 0.5})
+    motion_tracking = RewTerm(func=motion_tracking_reward, weight=3.0, params={"std": 0.5})
     object_approach = RewTerm(
         func=object_approach_reward,
-        weight=2.0,
+        weight=1.0,
         params={"std": 0.3, "robot_cfg": SceneEntityCfg("robot"), "object_cfg": SceneEntityCfg("novelty")},
     )
 
@@ -327,7 +393,7 @@ class G1HandoverTerminationsCfg:
 @configclass
 class G1HandoverEnvCfg(ManagerBasedRLEnvCfg):
     """環境全体の統合設定"""
-    scene: G1HandoverSceneCfg = G1HandoverSceneCfg(num_envs=64, env_spacing=2.5)
+    scene: G1HandoverSceneCfg = G1HandoverSceneCfg(num_envs=512, env_spacing=2.5)
     observations: G1HandoverObservationCfg = G1HandoverObservationCfg()
     actions: G1HandoverActionsCfg = G1HandoverActionsCfg()
     rewards: G1HandoverRewardsCfg = G1HandoverRewardsCfg()
@@ -353,8 +419,8 @@ from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPp
 @configclass
 class G1HandoverPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 1500  # ティーチャー学習用の長め設定
-    save_interval = 50
+    max_iterations = 5000
+    save_interval = 100
     experiment_name = "g1_handover_teacher"
     empirical_normalization = False
 

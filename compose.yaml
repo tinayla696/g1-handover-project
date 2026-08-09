@@ -25,7 +25,7 @@ services:
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
       --task G1-Handover-v0
-      --num_envs 64
+      --num_envs 512
       --livestream 2
       --kit_args "--/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998"
 
