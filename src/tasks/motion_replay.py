@@ -178,6 +178,49 @@ def _write_joint_positions(robot, joint_pos_tensor: torch.Tensor):
     )
 
 
+_HANDOVER7_ALIAS = {
+    "torso_joint": "waist_pitch_joint",
+    "left_elbow_pitch_joint": "left_elbow_joint",
+    "right_elbow_pitch_joint": "right_elbow_joint",
+    "left_elbow_roll_joint": "left_wrist_roll_joint",
+    "right_elbow_roll_joint": "right_wrist_roll_joint",
+    "left_zero_joint": "left_hand_thumb_0_joint",
+    "left_one_joint": "left_hand_thumb_1_joint",
+    "left_two_joint": "left_hand_thumb_2_joint",
+    "left_three_joint": "left_hand_index_0_joint",
+    "left_four_joint": "left_hand_index_1_joint",
+    "left_five_joint": "left_hand_middle_0_joint",
+    "left_six_joint": "left_hand_middle_1_joint",
+    "right_zero_joint": "right_hand_thumb_0_joint",
+    "right_one_joint": "right_hand_thumb_1_joint",
+    "right_two_joint": "right_hand_thumb_2_joint",
+    "right_three_joint": "right_hand_index_0_joint",
+    "right_four_joint": "right_hand_index_1_joint",
+    "right_five_joint": "right_hand_middle_0_joint",
+    "right_six_joint": "right_hand_middle_1_joint",
+}
+
+
+def _build_mapped_frame(
+    motion_joint_names: list[str],
+    robot_joint_names: list[str],
+    default_joint_pos: torch.Tensor,
+    raw_frames: np.ndarray,
+    device: str,
+) -> torch.Tensor:
+    """Return (N_frames, N_robot_joints) tensor mapped by name from HandOver7 source."""
+    src_idx = {name: i for i, name in enumerate(motion_joint_names)}
+    mapped = torch.from_numpy(np.tile(default_joint_pos.cpu().numpy(), (raw_frames.shape[0], 1))).float()
+    count = 0
+    for robot_idx, robot_name in enumerate(robot_joint_names):
+        src_name = robot_name if robot_name in src_idx else _HANDOVER7_ALIAS.get(robot_name)
+        if src_name and src_name in src_idx:
+            mapped[:, robot_idx] = torch.from_numpy(raw_frames[:, src_idx[src_name]]).float()
+            count += 1
+    print(f"Mapped {count}/{len(robot_joint_names)} joints from HandOver7 → G1", flush=True)
+    return mapped.to(device)
+
+
 def main():
     motion_dir = Path(args_cli.motion_dir)
 
@@ -196,20 +239,48 @@ def main():
         robot = env_unwrapped.scene["robot"]
     except KeyError as exc:
         raise RuntimeError("Could not find 'robot' articulation in environment scene.") from exc
-    joint_names = _get_robot_joint_names(robot)
-    frames = _resolve_motion_frames(motion_dir, args_cli.source, joint_names)
+
+    robot_joint_names = _get_robot_joint_names(robot)
+    device = getattr(robot, "device", "cpu")
+    default_joint_pos = robot.data.default_joint_pos[0].cpu().numpy()
+
+    # Load raw NPZ with joint_names metadata for name-based mapping
+    npz_path = motion_dir / "HandOver7_unitree_g1.npz"
+    if not npz_path.exists():
+        npz_path = motion_dir / "HandOver7.npz"
+
+    motion_joint_names: list[str] | None = None
+    if npz_path.exists():
+        payload = np.load(npz_path, allow_pickle=True)
+        if "joint_names" in payload:
+            motion_joint_names = [str(n) for n in np.asarray(payload["joint_names"]).tolist()]
+        raw_key = next((k for k in ("joint_positions", "joint_pos", "joint_position", "qpos", "positions") if k in payload), None)
+        if raw_key is None and len(payload.files) == 1:
+            raw_key = payload.files[0]
+        raw_frames = np.asarray(payload[raw_key], dtype=np.float32) if raw_key else None
+    else:
+        raw_frames = None
+
+    if raw_frames is not None and motion_joint_names is not None:
+        # Name-based mapping via alias table
+        frames_tensor = _build_mapped_frame(motion_joint_names, robot_joint_names, torch.from_numpy(default_joint_pos), raw_frames, device)
+        frames = frames_tensor.cpu().numpy()
+    else:
+        # Fallback: index-based (first N columns)
+        frames = _resolve_motion_frames(motion_dir, args_cli.source, robot_joint_names)
+        print("[WARN] joint_names not in NPZ; using index-based fallback mapping", flush=True)
 
     if args_cli.max_frames > 0:
         frames = frames[: args_cli.max_frames]
 
-    print(f"Loaded {frames.shape[0]} frames for {frames.shape[1]} joints.")
+    print(f"Loaded {frames.shape[0]} frames for {frames.shape[1]} joints.", flush=True)
 
     dt = 1.0 / max(args_cli.fps, 1e-6)
-    device = getattr(robot, "device", "cpu")
 
     try:
         while simulation_app.is_running():
             for i in range(frames.shape[0]):
+                t0 = time.monotonic()
                 frame_tensor = torch.tensor(frames[i], dtype=torch.float32, device=device).unsqueeze(0)
                 _write_joint_positions(robot, frame_tensor)
 
@@ -219,9 +290,11 @@ def main():
                 env_unwrapped.scene.update(env_unwrapped.physics_dt)
 
                 if (i + 1) % 60 == 0:
-                    print(f"  replay frame {i + 1}/{frames.shape[0]}")
+                    print(f"  replay frame {i + 1}/{frames.shape[0]}", flush=True)
 
-                time.sleep(dt)
+                elapsed = time.monotonic() - t0
+                if elapsed < dt:
+                    time.sleep(dt - elapsed)
 
                 if not simulation_app.is_running():
                     break
