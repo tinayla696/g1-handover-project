@@ -2,6 +2,7 @@ import argparse
 import copy
 import importlib.metadata as metadata
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -184,6 +185,8 @@ def main():
         step_index = 0
         try:
             while simulation_app.is_running():
+                t_step_start = time.monotonic()
+
                 frame = motion_buffer[step_index % motion_buffer.shape[0]].to(robot.device)
                 target_joint_pos = default_joint_pos.clone()
 
@@ -198,6 +201,11 @@ def main():
                 with torch.inference_mode():
                     obs, _, terminated, truncated, _ = env.step(raw_action)
 
+                # Rate-limit to CONTROL_DT wall-clock to prevent NVST encoder overload
+                elapsed = time.monotonic() - t_step_start
+                if elapsed < CONTROL_DT:
+                    time.sleep(CONTROL_DT - elapsed)
+
                 step_index += 1
                 if step_index % 60 == 0:
                     max_delta = float((target_joint_pos - default_joint_pos).abs().max().item())
@@ -206,8 +214,17 @@ def main():
                         f"  motion replay step {step_index} | max_joint_delta={max_delta:.3f}rad | max_action={max_action:.2f}",
                         flush=True,
                     )
+                # Log per-joint deltas once at startup to identify which joints move
+                if step_index == 60:
+                    deltas = (target_joint_pos - default_joint_pos).abs().squeeze(0)
+                    print("  [JOINT DELTA SNAPSHOT] top-10 moving joints:", flush=True)
+                    top_indices = deltas.argsort(descending=True)[:10]
+                    for idx in top_indices:
+                        jname = robot_joint_names[int(idx)] if int(idx) < len(robot_joint_names) else f"joint_{idx}"
+                        print(f"    {jname}: {float(deltas[idx]):.4f} rad", flush=True)
 
                 if bool((terminated | truncated).any().item()):
+                    print(f"  [RESET] terminated at step {step_index}", flush=True)
                     if args_cli.loop:
                         obs, _ = env.reset(seed=args_cli.seed)
                         continue
