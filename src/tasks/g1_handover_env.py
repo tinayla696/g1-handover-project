@@ -339,7 +339,7 @@ class G1HandoverEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 0.005  # 200Hz
         self.decimation = 4   # ポリシーは50Hzで制御
         self.sim.render_interval = self.decimation
-        self.episode_length_s = 6.0
+        self.episode_length_s = 12.0  # HandOver7は9.98秒、余裕を持たせる
 
         try:
             motion_buffer = MotionBufferManager.get_buffer()

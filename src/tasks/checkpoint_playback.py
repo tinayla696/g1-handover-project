@@ -224,9 +224,11 @@ def main():
                         print(f"    {jname}: {float(deltas[idx]):.4f} rad", flush=True)
 
                 if bool((terminated | truncated).any().item()):
-                    print(f"  [RESET] terminated at step {step_index}", flush=True)
+                    reason = "timeout" if bool(truncated.any().item()) else "fall"
+                    print(f"  [RESET] {reason} at step {step_index}", flush=True)
                     if args_cli.loop:
                         obs, _ = env.reset(seed=args_cli.seed)
+                        step_index = 0  # restart motion from frame 0
                         continue
                     break
         finally:
