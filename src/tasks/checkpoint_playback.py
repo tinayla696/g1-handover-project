@@ -120,7 +120,8 @@ def main():
         env_cfg.log_dir = str(checkpoint_path.parent)
 
     print("Creating playback environment...", flush=True)
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array", disable_env_checker=True)
+    # render_mode="rgb_array" creates an offscreen framebuffer that hijacks the WebRTC viewport
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode=None, disable_env_checker=True)
 
     if args_cli.mode == "motion":
         print(f"TASK_ID: {TASK_ID}", flush=True)
@@ -263,10 +264,15 @@ def main():
     step_index = 0
     try:
         while simulation_app.is_running():
+            t_step_start = time.monotonic()
             with torch.inference_mode():
                 actions = policy(obs)
                 obs, _, dones, _ = env.step(actions)
                 policy.reset(dones)
+            # Rate-limit to CONTROL_DT to prevent NVST encoder overload (NVST_R_BUSY)
+            elapsed = time.monotonic() - t_step_start
+            if elapsed < CONTROL_DT:
+                time.sleep(CONTROL_DT - elapsed)
             step_index += 1
             if step_index % 60 == 0:
                 print(f"  playback step {step_index}", flush=True)
