@@ -128,7 +128,7 @@ def main():
         env_cfg.log_dir = str(checkpoint_path.parent)
 
     print("Creating playback environment...", flush=True)
-    # render_mode="rgb_array" creates an offscreen framebuffer that hijacks the WebRTC viewport
+    # Keep rendering attached to the DCV desktop window.
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode=None, disable_env_checker=True)
 
     if args_cli.mode == "motion":
@@ -210,8 +210,7 @@ def main():
                 with torch.inference_mode():
                     obs, _, terminated, truncated, _ = env.step(raw_action)
 
-                # Explicit render keeps WebRTC viewport updates responsive even when
-                # simulator stepping continues but the stream appears visually stuck.
+                # Explicit render keeps the DCV desktop window responsive.
                 _safe_render(env)
 
                 # Rate-limit to CONTROL_DT wall-clock to prevent NVST encoder overload
@@ -281,10 +280,8 @@ def main():
                 actions = policy(obs)
                 obs, _, dones, _ = env.step(actions)
                 policy.reset(dones)
-            # Explicit render keeps WebRTC viewport updates responsive even when
-            # simulator stepping continues but the stream appears visually stuck.
+            # Explicit render keeps the DCV desktop window responsive.
             _safe_render(env)
-            # Rate-limit to CONTROL_DT to prevent NVST encoder overload (NVST_R_BUSY)
             elapsed = time.monotonic() - t_step_start
             if elapsed < CONTROL_DT:
                 time.sleep(CONTROL_DT - elapsed)

@@ -8,8 +8,8 @@ This repository configures a reinforcement learning environment for the Unitree 
 
 ## 2. Active Software & Network Stack (As of August 2026)
 *   **Server Environment:** Isaac Sim `6.0.1` (Docker Container) + Isaac Lab `Core` running on `torch 2.10.0+cu128`.
-*   **Client Environment:** Isaac Sim WebRTC Streaming Client `2.0.0` (Local PC).
-*   **Network Ports:** Fixed exclusively to:
+*   **Client Environment:** NICE DCV desktop session with NVIDIA GPU acceleration.
+*   **Network Ports:** Isaac Sim streaming ports are not used; GUI access is provided through NICE DCV.
     *   `TCP 49100` (Signaling)
     *   `UDP 47998` (Livestream)
 *   **Data Lifecycle:** Source code is managed in GitHub. Heavy RL logs and checkpoints (`logs/`) are completely excluded from Git via `.gitignore`. They are synced bidirectionally between the host and **AWS S3 (`s3://g1-gr00t-models-380421147972-us-east-1-an/`)** before and after container execution via `run_env.sh`.

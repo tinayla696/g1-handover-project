@@ -1,11 +1,9 @@
 #!/bin/bash
 set -e
 
-export PUBLIC_IP=$(curl -s ifconfig.me)
 export TASK_ID="${1:-g1_handover_teacher}"
 
-echo "🌍 Public IP: ${PUBLIC_IP}"
-echo "🎬 Kinematic replay (motion_replay.py / PD制御バイパス)"
+echo "🎬 DCV kinematic replay (motion_replay.py / PD制御バイパス)"
 
 ./scripts/download_motions.sh
 

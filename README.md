@@ -19,7 +19,7 @@ AWSのキャパシティ不足を回避するため、コードと学習成果�
 ```mermaid
 flowchart TD
     subgraph local_pc["Local PC"]
-        client["Isaac Sim WebRTC Client 2.0.0"]
+        dcv["NICE DCV Client"]
     end
 
     subgraph aws_ec2["AWS EC2 Instance (g7e / g5 / g6)"]
@@ -38,7 +38,7 @@ flowchart TD
     s3 -->|2. aws s3 sync latest| logs
     host -->|3. compose up| docker
     docker -->|4. Train Loop 1000 iter| logs
-    docker -.->|5. WebRTC Stream / TCP:49100, UDP:47998| client
+    docker -.->|5. Isaac Sim GUI / X11| dcv
     logs -->|6. aws s3 sync archive| s3
 ```
 
@@ -69,55 +69,12 @@ chmod +x run_env.sh
 
 ```
 
-### 3. ローカルPCからの接続
+### 3. DCVからの接続
 
-1. **Isaac Sim WebRTC Streaming Client 2.0.0** を起動。
-2. Server 欄に EC2 の `パブリックIPアドレスのみ` を入力（※ポート番号は入力しない）。
-    例: `34.x.x.x` は可、`172.31.x.x` (VPC private IP) は不可。
-3. **Connect** をクリックして画面が展開することを確認。
+1. SSHトンネルを作成: `ssh -L 8443:localhost:8443 avita-g5.24`
+2. DCV Clientで `localhost:8443` に接続。
+3. DCV上のターミナルで `./scripts/check_dcv_environment.sh` を実行。
 
-### 4. 最終チェックポイントのループ再生
-
-学習後の最終チェックポイントを目視確認したい場合は、学習ランチャーとは別に以下を使います。
-
-```bash
-chmod +x scripts/run_playback.sh
-./scripts/run_playback.sh g1_handover_teacher
-```
-
-このランチャーは `logs/<task_id>/` 配下から最新の `model_*.pt` を選び、ローカルに見つからない場合のみ S3 の `checkpoints/<task_id>/latest/` を同期してから WebRTC 付きでループ再生します。
-
-### 5. Playback フリーズ切り分け手順（初期配置で停止する場合）
-
-アセット初期配置で画面が固まる場合は、以下の順に実行して原因を切り分けてください。
-
-```bash
-# 0) 既存コンテナの掃除
-docker rm -f isaac-sim-groot 2>/dev/null || true
-
-# 1) WebRTC 基盤確認（ポリシー推論なし）
-./scripts/run_visual_check.sh
-
-# 2) モーション再生確認（チェックポイント推論なし）
-./scripts/run_playback.sh g1_handover_teacher motion
-
-# 3) チェックポイント推論再生
-./scripts/run_playback.sh g1_handover_teacher policy
-```
-
-期待結果:
-
-1. `visual-check` が安定して表示される。
-2. `motion` が安定表示されるなら、WebRTC初期化と描画ループは概ね健全。
-3. `policy` のみで停止する場合は、チェックポイント依存の負荷（初期行動の急変など）が疑わしい。
-
-注意:
-
-1. WebRTC Client 2.0.0 の Server 欄は `パブリックIPのみ` を入力（`:49100` は付けない）。
-    EC2 上で `curl -s ifconfig.me` を実行して表示される値を使ってください。
-2. playback の `kit_args` は visual-check/kinematic と同等の WebRTC 指定（streamType/publicIp/port/targetFps/maxBitrate）に統一済みです。
-
-### 6. DCV 直接再生（WebRTC回避）
 
 WebRTC Client で固着する場合は、DCVデスクトップへ接続し、DCV内のターミナルからIsaac Simを起動してください。Isaac SimのウィンドウはDCVのX11画面へ直接表示されます。
 

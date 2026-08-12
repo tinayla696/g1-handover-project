@@ -28,8 +28,6 @@ find_latest_checkpoint() {
 	find "$1" -type f -name 'model_*.pt' | sort -V | tail -n 1
 }
 
-export PUBLIC_IP
-PUBLIC_IP=$(curl -s ifconfig.me)
 export TASK_ID
 export PLAYBACK_MODE
 
@@ -52,11 +50,10 @@ fi
 
 export PLAYBACK_CHECKPOINT="${LATEST_CHECKPOINT}"
 
-echo "🌍 Public IP Detected: ${PUBLIC_IP}"
 echo "🧩 Task ID: ${TASK_ID}"
 echo "🎯 Playback checkpoint: ${PLAYBACK_CHECKPOINT}"
 echo "🎞️ Playback mode: ${PLAYBACK_MODE}"
-echo "🖥️ Desktop playback mode (no WebRTC): requires active remote desktop session"
+echo "🖥️ Desktop playback mode: requires active DCV/X11 session"
 
 if [[ ! -x ./scripts/download_motions.sh ]]; then
 	chmod +x ./scripts/download_motions.sh

@@ -1,31 +1,4 @@
 services:
-  isaac-sim-webrtc-demo:
-    profiles: ["webrtc-demo"]
-    image: nvcr.io/nvidia/isaac-sim:6.0.1
-    container_name: isaac-sim-groot
-    user: "0:0"
-    network_mode: host
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    environment:
-      - ACCEPT_EULA=Y
-      - PRIVACY_CONSENT=yes
-      - PUBLIC_IP=${PUBLIC_IP}
-    volumes:
-      - .:/workspace/g1-handover-project
-    entrypoint: []
-    command: >
-      /isaac-sim/python.sh /workspace/g1-handover-project/scripts/webrtc_demo.py
-      --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP}
-      --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100
-      --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998
-      --/exts/omni.kit.livestream.app/primaryStream/dynamicResize=true
-
   isaac-sim-default-play:
     profiles: ["default-play"]
     image: nvcr.io/nvidia/isaac-sim:6.0.1
@@ -41,7 +14,6 @@ services:
               capabilities: [gpu]
     environment:
       - ACCEPT_EULA=Y
-      - PUBLIC_IP=${PUBLIC_IP}
       - TASK_ID=${TASK_ID:-g1_handover_teacher}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
@@ -53,9 +25,7 @@ services:
       --task G1-Handover-v0
       --num_envs 1
       --checkpoint ${PLAYBACK_CHECKPOINT}
-      --livestream 2
       --enable_cameras
-      --kit_args "--/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=2 --/exts/omni.kit.livestream.app/primaryStream/dynamicResize=true"
 
   isaac-sim-train:
     profiles: ["train"]
@@ -72,7 +42,6 @@ services:
               capabilities: [gpu]
     environment:
       - ACCEPT_EULA=Y
-      - PUBLIC_IP=${PUBLIC_IP}
       - TASK_ID=${TASK_ID:-g1_handover_base}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
@@ -84,8 +53,6 @@ services:
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
       --task G1-Handover-v0
       --num_envs 512
-      --livestream 2
-      --kit_args "--/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998"
 
   isaac-sim-visual-check:
     profiles: ["visual-check"]
@@ -102,7 +69,6 @@ services:
               capabilities: [gpu]
     environment:
       - ACCEPT_EULA=Y
-      - PUBLIC_IP=${PUBLIC_IP}
       - TASK_ID=${TASK_ID:-g1_handover_base}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
@@ -115,9 +81,7 @@ services:
       --task G1-Handover-v0
       --num_envs 1
       --steps ${VISUAL_CHECK_STEPS:-7200}
-      --livestream 2
       --enable_cameras
-      --kit_args "--/app/window/width=1920 --/app/window/height=1080 --/exts/omni.kit.livestream.app/primaryStream/streamType=webrtc --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=30 --/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=true"
 
   isaac-sim-playback:
     profiles: ["playback"]
@@ -134,13 +98,9 @@ services:
               capabilities: [gpu]
     environment:
       - ACCEPT_EULA=Y
-      - PUBLIC_IP=${PUBLIC_IP}
       - TASK_ID=${TASK_ID:-g1_handover_base}
       - PLAYBACK_CHECKPOINT=${PLAYBACK_CHECKPOINT}
       - PLAYBACK_MODE=${PLAYBACK_MODE:-policy}
-      # WebRTC のエンコーダ制御
-      - NVST_BITRATE=4000  # ビットレート制限 (kbps)
-      - NVST_FRAMERATE=15  # フレームレート制限 (fps)
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
@@ -153,9 +113,7 @@ services:
       --checkpoint ${PLAYBACK_CHECKPOINT}
       --mode ${PLAYBACK_MODE:-policy}
       --loop
-      --livestream 2
       --enable_cameras
-      --kit_args "--/app/window/width=1280 --/app/window/height=720 --/exts/omni.kit.livestream.app/primaryStream/streamType=webrtc --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=15 --/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=true --/exts/omni.kit.livestream.app/primaryStream/maxBitrate=4000 --/rtx/hydra/readTransformsFromFabricInRenderDelegate=false"
 
   isaac-sim-playback-desktop:
     profiles: ["playback-desktop"]
@@ -172,7 +130,6 @@ services:
               capabilities: [gpu]
     environment:
       - ACCEPT_EULA=Y
-      - PUBLIC_IP=${PUBLIC_IP}
       - TASK_ID=${TASK_ID:-g1_handover_base}
       - PLAYBACK_CHECKPOINT=${PLAYBACK_CHECKPOINT}
       - PLAYBACK_MODE=${PLAYBACK_MODE:-policy}
@@ -212,7 +169,7 @@ services:
       - TASK_ID=${TASK_ID:-g1_handover_teacher}
       - PLAYBACK_CHECKPOINT=${PLAYBACK_CHECKPOINT}
       - PLAYBACK_MODE=${PLAYBACK_MODE:-policy}
-      - DISPLAY=${DISPLAY}
+      - DISPLAY=${DISPLAY:-:0}
       - XAUTHORITY=/root/.Xauthority
       - NVIDIA_DRIVER_CAPABILITIES=all
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
@@ -222,7 +179,7 @@ services:
       - .:/workspace/g1-handover-project
       - ./logs/${TASK_ID:-g1_handover_teacher}:/workspace/g1-handover-project/logs
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - ${DCV_XAUTHORITY}:/root/.Xauthority:ro
+      - ${DCV_XAUTHORITY:-/home/ubuntu/.Xauthority}:/root/.Xauthority:ro
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/tasks/checkpoint_playback.py
@@ -249,7 +206,6 @@ services:
               capabilities: [gpu]
     environment:
       - ACCEPT_EULA=Y
-      - PUBLIC_IP=${PUBLIC_IP}
       - TASK_ID=${TASK_ID:-g1_handover_base}
       - MOTION_DIR=/workspace/g1-handover-project/data/motions/HandOver7
     volumes:
@@ -263,6 +219,34 @@ services:
       --motion_dir /workspace/g1-handover-project/data/motions/HandOver7
       --fps 50
       --loop
-      --livestream 2
       --enable_cameras
-      --kit_args "--/app/window/width=1280 --/app/window/height=720 --/exts/omni.kit.livestream.app/primaryStream/streamType=webrtc --/exts/omni.kit.livestream.app/primaryStream/publicIp=${PUBLIC_IP} --/exts/omni.kit.livestream.app/primaryStream/signalPort=49100 --/exts/omni.kit.livestream.app/primaryStream/streamPort=47998 --/exts/omni.kit.livestream.app/primaryStream/targetFps=15 --/exts/omni.kit.livestream.app/primaryStream/allowDynamicResize=true --/exts/omni.kit.livestream.app/primaryStream/maxBitrate=4000"
+
+  isaac-sim-dcv-gui-check:
+    profiles: ["dcv-gui-check"]
+    image: nvcr.io/nvidia/isaac-sim:6.0.1
+    container_name: isaac-sim-groot
+    user: "0:0"
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - ACCEPT_EULA=Y
+      - DISPLAY=${DISPLAY:-:0}
+      - XAUTHORITY=/root/.Xauthority
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - __GLX_VENDOR_LIBRARY_NAME=nvidia
+    volumes:
+      - ../IsaacLab:/workspace/IsaacLab
+      - .:/workspace/g1-handover-project
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${DCV_XAUTHORITY:-/home/ubuntu/.Xauthority}:/root/.Xauthority:ro
+    entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
+    command: >
+      /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/scripts/dcv_gui_popup.py
+      --seconds ${DCV_GUI_SECONDS:-30}
+      --kit_args "--/app/window/enabled=true --/app/window/visible=true --/app/window/noWindowMode=false --/app/window/fullscreen=false --/app/window/width=1600 --/app/window/height=900"

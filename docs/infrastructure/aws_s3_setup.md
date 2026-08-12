@@ -1,14 +1,25 @@
-# AWSポート設定 & S3同期ライフサイクル
+# NICE DCV 接続 & S3同期ライフサイクル
 
-## 🔌 ポートマッピングの固定理由
+## 🖥️ DCV接続
 
-最新の Isaac Sim WebRTC ストリーミングでは、インフラの暗号化バグやNAT越えの失敗を防止するため、公式ドキュメントに準拠した以下の **2つのポートのみをピンポイントで開放** します。
+映像確認とカメラ操作はNICE DCV上で行います。Isaac Sim用のストリーミングクライアントや専用ストリーミングポートは使用しません。
 
-*   **TCP: 49100** (シグナリング通信用)
-*   **UDP: 47998** (映像・操作ストリーム用)
+```bash
+ssh -L 8443:localhost:8443 avita-g5.24
+```
 
-!!! warning "ローカルアプリ接続時の注意点"
-    ローカルPCの **Isaac Sim WebRTC Streaming Client 2.0.0** から接続する際、Server欄には `54.175.219.198` のように**パブリックIPアドレスのみ**を入力してください。`:49100` などのポート番号を末尾に付与すると、アプリ内部のエラーにより画面が真っ黒のまま即時切断（`NVST_CCE_DISCONNECTED`）されます。
+DCV Clientは `localhost:8443` に接続します。DCV接続後、EC2上でGPU描画を確認します。
+
+```bash
+sudo XAUTHORITY=/run/user/127/gdm/Xauthority DISPLAY=:0 xhost +
+sudo cp /run/user/127/gdm/Xauthority "$HOME/.Xauthority"
+sudo chown "$(id -u):$(id -g)" "$HOME/.Xauthority"
+export DISPLAY=:0
+export XAUTHORITY="$HOME/.Xauthority"
+glxinfo | grep -E "OpenGL vendor|OpenGL renderer"
+```
+
+`NVIDIA A10G` が表示されることを確認してから、`scripts/check_dcv_environment.sh` を実行します。
 
 ## ☁️ S3データライフサイクル
 

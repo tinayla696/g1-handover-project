@@ -28,7 +28,6 @@ find_latest_checkpoint() {
 	find "$1" -type f -name 'model_*.pt' | sort -V | tail -n 1
 }
 
-export PUBLIC_IP=$(curl -s ifconfig.me)
 export TASK_ID
 
 if [[ ! -d "${LOCAL_LATEST_DIR}" ]]; then
@@ -63,7 +62,6 @@ fi
 export PLAYBACK_CHECKPOINT="${LATEST_CHECKPOINT}"
 export PLAYBACK_MODE
 
-echo "🌍 Public IP Detected: ${PUBLIC_IP}"
 echo "🧩 Task ID: ${TASK_ID}"
 echo "🎯 Playback checkpoint: ${PLAYBACK_CHECKPOINT}"
 echo "🎞️ Playback mode: ${PLAYBACK_MODE}"

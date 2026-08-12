@@ -31,7 +31,7 @@ def main():
 
     # Isaac Lab environments return torch tensors by design.
     # Disable Gymnasium passive checker to avoid non-actionable warnings during visual checks.
-    # Offscreen rgb_array can hijack the WebRTC viewport and appear as a black screen.
+    # Keep rendering attached to the DCV desktop window.
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode=None, disable_env_checker=True)
     env.reset(seed=args_cli.seed)
 

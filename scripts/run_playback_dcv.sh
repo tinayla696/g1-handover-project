@@ -89,7 +89,7 @@ echo "DCV display: ${DISPLAY}"
 echo "Task ID: ${TASK_ID}"
 echo "Checkpoint: ${PLAYBACK_CHECKPOINT}"
 echo "Playback mode: ${PLAYBACK_MODE}"
-echo "WebRTC: disabled; rendering through DCV X11 display"
+echo "Rendering through DCV X11 display"
 
 ./scripts/download_motions.sh
 

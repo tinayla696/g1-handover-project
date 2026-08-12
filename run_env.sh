@@ -23,12 +23,9 @@ LOCAL_LATEST_DIR="${LOCAL_TASK_LOG_DIR}/latest"
 S3_CHECKPOINT_LATEST_DIR="s3://${S3_BUCKET}/checkpoints/${TASK_ID}/latest/"
 S3_LOG_ROOT="s3://${S3_BUCKET}/logs/${TASK_ID}"
 
-# パブリックIPを動的に取得して環境変数にセット
-export PUBLIC_IP=$(curl -s ifconfig.me)
 export TASK_ID
 export VISUAL_CHECK_STEPS="${VISUAL_CHECK_STEPS:-7200}"
 
-echo "🌍 Public IP Detected: ${PUBLIC_IP}"
 echo "🧩 Task ID: ${TASK_ID}"
 if [[ "${RUN_PROFILE}" == "visual-check" ]]; then
 	echo "🕒 Visual check steps: ${VISUAL_CHECK_STEPS}"
