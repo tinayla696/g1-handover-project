@@ -20,6 +20,34 @@ Isaac Lab のデフォルトの全部入りインストール（`--install`）�
 
 ## 🧾 実行ログ運用（非致命Warningの扱い）
 
+### NICE DCV + NVIDIA GPU GUI再生
+
+WebRTC Clientを使わず、NICE DCVのGUI上でIsaac Simを操作する場合は、SSHトンネルとGDMのXauthorityを使用します。
+
+```bash
+ssh -L 8443:localhost:8443 avita-g5.24
+```
+
+DCV Clientは `localhost:8443` に接続します。DCV接続後、EC2上で以下を実行します。
+
+```bash
+sudo XAUTHORITY=/run/user/127/gdm/Xauthority DISPLAY=:0 xhost +
+sudo cp /run/user/127/gdm/Xauthority "$HOME/.Xauthority"
+sudo chown "$(id -u):$(id -g)" "$HOME/.Xauthority"
+export XAUTHORITY="$HOME/.Xauthority"
+export DISPLAY=:0
+glxinfo | grep -E "OpenGL vendor|OpenGL renderer"
+```
+
+`OpenGL renderer string: NVIDIA A10G/PCIe/SSE2` を確認できたら、policy再生を実行します。
+
+```bash
+./scripts/check_dcv_environment.sh
+./scripts/run_playback_dcv.sh g1_handover_teacher policy
+```
+
+DCV ComposeではXauthorityをコンテナ内の `/root/.Xauthority` としてマウントし、WebRTCポートや `--livestream` は使用しません。
+
 Isaac Sim 6.0.1 の visual check / train 実行時には、終了コードが `0` でも以下の Warning が出る場合があります。これらは本プロジェクトでは**既知のノイズ**として扱います。
 
 | ログ断片 | 主な意味 | 判定 | 対応方針 |
@@ -29,6 +57,7 @@ Isaac Sim 6.0.1 の visual check / train 実行時には、終了コードが `0
 | `Enable omni.materialx.libs extension...` | MaterialX拡張の案内 | 非致命 | MaterialXを使わない限り無視可 |
 | `TGS solver ... noisy velocities` | 物理ソルバ設定に関する注意 | 注意 | 学習安定性を見て必要時のみ調整 |
 | `Seed not set for the environment` | 環境seed未設定 | 改善対象 | `src/train.py` と `src/tasks/visual_check.py` で seed を明示設定 |
+| `GLXBadFBConfig` | DCV/X11 がIsaac Sim用のGPU OpenGL FBConfigを提供していない | 致命的 | DCV GL/GPUアクセラレーションをサーバー側で有効化 |
 
 ### ✅ 成功判定の基準
 

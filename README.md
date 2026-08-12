@@ -73,6 +73,7 @@ chmod +x run_env.sh
 
 1. **Isaac Sim WebRTC Streaming Client 2.0.0** を起動。
 2. Server 欄に EC2 の `パブリックIPアドレスのみ` を入力（※ポート番号は入力しない）。
+    例: `34.x.x.x` は可、`172.31.x.x` (VPC private IP) は不可。
 3. **Connect** をクリックして画面が展開することを確認。
 
 ### 4. 最終チェックポイントのループ再生
@@ -85,6 +86,120 @@ chmod +x scripts/run_playback.sh
 ```
 
 このランチャーは `logs/<task_id>/` 配下から最新の `model_*.pt` を選び、ローカルに見つからない場合のみ S3 の `checkpoints/<task_id>/latest/` を同期してから WebRTC 付きでループ再生します。
+
+### 5. Playback フリーズ切り分け手順（初期配置で停止する場合）
+
+アセット初期配置で画面が固まる場合は、以下の順に実行して原因を切り分けてください。
+
+```bash
+# 0) 既存コンテナの掃除
+docker rm -f isaac-sim-groot 2>/dev/null || true
+
+# 1) WebRTC 基盤確認（ポリシー推論なし）
+./scripts/run_visual_check.sh
+
+# 2) モーション再生確認（チェックポイント推論なし）
+./scripts/run_playback.sh g1_handover_teacher motion
+
+# 3) チェックポイント推論再生
+./scripts/run_playback.sh g1_handover_teacher policy
+```
+
+期待結果:
+
+1. `visual-check` が安定して表示される。
+2. `motion` が安定表示されるなら、WebRTC初期化と描画ループは概ね健全。
+3. `policy` のみで停止する場合は、チェックポイント依存の負荷（初期行動の急変など）が疑わしい。
+
+注意:
+
+1. WebRTC Client 2.0.0 の Server 欄は `パブリックIPのみ` を入力（`:49100` は付けない）。
+    EC2 上で `curl -s ifconfig.me` を実行して表示される値を使ってください。
+2. playback の `kit_args` は visual-check/kinematic と同等の WebRTC 指定（streamType/publicIp/port/targetFps/maxBitrate）に統一済みです。
+
+### 6. DCV 直接再生（WebRTC回避）
+
+WebRTC Client で固着する場合は、DCVデスクトップへ接続し、DCV内のターミナルからIsaac Simを起動してください。Isaac SimのウィンドウはDCVのX11画面へ直接表示されます。
+
+```bash
+echo "$DISPLAY"                         # 例: :1 または :2
+export XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/dcv/gui.xauth}"
+echo "$XAUTHORITY"
+xdpyinfo -display "$DISPLAY" >/dev/null && echo "X display OK"
+chmod +x scripts/run_playback_dcv.sh
+./scripts/run_playback_dcv.sh g1_handover_teacher policy
+```
+
+`DISPLAY` が空、または `xdpyinfo` が失敗する場合は、DCVセッション内のターミナルではありません。DCVのデスクトップからターミナルを起動して再実行してください。DCVでは通常 `/run/user/<uid>/dcv/gui.xauth` が認証ファイルです。`XAUTHORITY` が未設定でも、スクリプトがこのファイルを優先して自動検出します。
+
+`X display OK` の後に `X Error ... GLXBadFBConfig` が出てIsaac Simが終了する場合は、DCVのX11認証ではなく、DCVサーバー側のGPU/OpenGLアクセラレーションが未設定です。DCV管理者側でGPU対応GLX（DCV GL）が有効であることを確認してから再実行してください。`OmniHub`、`isaaclab_visualizers`、`failed to open the default display` はこのエラーの直接原因ではありません。
+
+この経路では `--livestream`、WebRTCポート、public IP を使用しません。WebRTCを完全に経由しないため、DCV上でカメラ操作とG1の動作確認を行えます。
+
+DCVサーバーの確認:
+
+```bash
+nvidia-smi
+echo "$DISPLAY"
+export XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/dcv/gui.xauth}"
+xdpyinfo -display "$DISPLAY" >/dev/null && echo "X display OK"
+```
+
+`X display OK` でも `GLXBadFBConfig` が出る場合は、DCVサーバー設定でGPUアクセラレーション/OpenGL（LinuxではDCV GL、必要に応じて `enable-gl-in-headless-mode`）を有効化する必要があります。これはリポジトリ内のDocker設定だけでは変更できません。
+
+期待結果:
+
+1. DCV画面上で Isaac Sim のウィンドウが開く。
+2. マウスで視点移動ができる。
+3. ログに `playback step` が出続ける間、ロボット挙動を直接目視できる。
+
+停止:
+
+```bash
+docker rm -f isaac-sim-groot
+```
+
+従来のX11デスクトップ経路を使う場合は `scripts/run_playback_desktop.sh` と `playback-desktop` プロファイルを使用できます。DCV環境では `run_playback_dcv.sh` を優先してください。
+
+### 7. NICE DCV + NVIDIA GPU policy再生
+
+SSHトンネル経由でDCV Clientへ接続する場合:
+
+```bash
+ssh -L 8443:localhost:8443 avita-g5.24
+```
+
+DCV Clientは `localhost:8443` に接続し、ユーザー `ubuntu` でログインします。DCV接続後、SSHターミナル上でGDMのXauthorityを利用してGPU描画を有効化します。
+
+```bash
+sudo XAUTHORITY=/run/user/127/gdm/Xauthority DISPLAY=:0 xhost +
+sudo cp /run/user/127/gdm/Xauthority "$HOME/.Xauthority"
+sudo chown "$(id -u):$(id -g)" "$HOME/.Xauthority"
+
+export XAUTHORITY="$HOME/.Xauthority"
+export DISPLAY=:0
+
+glxinfo | grep -E "OpenGL vendor|OpenGL renderer"
+```
+
+`OpenGL renderer string: NVIDIA A10G/PCIe/SSE2` が確認できたら、G1の学習済みpolicyをDCV画面へ直接再生します。
+
+```bash
+cd ~/Workspace/g1-handover-project
+chmod +x scripts/check_dcv_environment.sh scripts/run_playback_dcv.sh
+./scripts/check_dcv_environment.sh
+
+chmod +x scripts/run_playback_dcv.sh
+./scripts/run_playback_dcv.sh g1_handover_teacher policy
+```
+
+`check_dcv_environment.sh` が `Host X11: OK`、`Host NVIDIA OpenGL: OK`、`Container GPU/X11 mounts: OK` まで出てから再生へ進みます。`DISPLAY` が未設定の場合、この診断スクリプトはDCVの標準値として `:0` を使用します。
+
+このコマンドはWebRTC Clientを使用せず、最新のローカルcheckpoint（なければS3から同期）を選択してDCVのIsaac Sim GUIへ表示します。停止は `Ctrl+C`、または別ターミナルから次を実行します。
+
+```bash
+docker rm -f isaac-sim-groot
+```
 
 
 ## 🛠 開発ルール (Docs as Code)

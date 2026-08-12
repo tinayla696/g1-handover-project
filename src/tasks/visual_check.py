@@ -31,20 +31,21 @@ def main():
 
     # Isaac Lab environments return torch tensors by design.
     # Disable Gymnasium passive checker to avoid non-actionable warnings during visual checks.
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array", disable_env_checker=True)
+    # Offscreen rgb_array can hijack the WebRTC viewport and appear as a black screen.
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode=None, disable_env_checker=True)
     env.reset(seed=args_cli.seed)
 
     action_dim = int(env.action_space.shape[-1])
     device = getattr(env, "device", "cpu")
     zero_actions = torch.zeros((1, action_dim), device=device)
 
-    print(f"🧩 TASK_ID: {TASK_ID}")
-    print("🔍 Running visual check with zero actions...")
+    print(f"🧩 TASK_ID: {TASK_ID}", flush=True)
+    print("🔍 Running visual check with zero actions...", flush=True)
     try:
         for step in range(args_cli.steps):
             _, _, terminated, truncated, _ = env.step(zero_actions)
             if (step + 1) % 60 == 0:
-                print(f"  step {step + 1}/{args_cli.steps}")
+                print(f"  step {step + 1}/{args_cli.steps}", flush=True)
             if terminated.any().item() or truncated.any().item():
                 env.reset(seed=args_cli.seed)
     finally:

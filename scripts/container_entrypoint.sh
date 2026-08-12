@@ -33,6 +33,19 @@ fi
 
 export GIT_PYTHON_GIT_EXECUTABLE="$(command -v git)"
 
+SETUP_CACHE_DIR="/tmp"
+SETUP_STAMP_FILE="${SETUP_CACHE_DIR}/isaaclab_setup_v1.done"
+
+if [[ -f "${SETUP_STAMP_FILE}" ]]; then
+	echo "========================================================="
+	echo "♻️  Cached setup detected. Skipping dependency installation."
+	echo "   Stamp: ${SETUP_STAMP_FILE}"
+	echo "========================================================="
+	exec "$@"
+fi
+
+mkdir -p "${SETUP_CACHE_DIR}"
+
 echo "========================================================="
 echo "🚀 1. G1 学習に必要な最小限の Isaac Lab 拡張のみをインストールします..."
 echo "========================================================="
@@ -123,4 +136,5 @@ python3 -m pip install -e .
 echo "========================================================="
 echo "🎉 3. 環境構築完了。強化学習をキックします..."
 echo "========================================================="
+touch "${SETUP_STAMP_FILE}"
 exec "$@"

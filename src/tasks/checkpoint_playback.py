@@ -42,6 +42,14 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 import tasks  # noqa: F401
 
 
+def _safe_render(env) -> None:
+    """Render with wrapper-awareness (RSL wrappers do not expose render())."""
+    render_target = env.unwrapped if hasattr(env, "unwrapped") else env
+    render_fn = getattr(render_target, "render", None)
+    if callable(render_fn):
+        render_fn()
+
+
 def _resolve_checkpoint_path(checkpoint: str) -> Path:
     path = Path(checkpoint)
     candidates = [path]
@@ -202,6 +210,10 @@ def main():
                 with torch.inference_mode():
                     obs, _, terminated, truncated, _ = env.step(raw_action)
 
+                # Explicit render keeps WebRTC viewport updates responsive even when
+                # simulator stepping continues but the stream appears visually stuck.
+                _safe_render(env)
+
                 # Rate-limit to CONTROL_DT wall-clock to prevent NVST encoder overload
                 elapsed = time.monotonic() - t_step_start
                 if elapsed < CONTROL_DT:
@@ -269,6 +281,9 @@ def main():
                 actions = policy(obs)
                 obs, _, dones, _ = env.step(actions)
                 policy.reset(dones)
+            # Explicit render keeps WebRTC viewport updates responsive even when
+            # simulator stepping continues but the stream appears visually stuck.
+            _safe_render(env)
             # Rate-limit to CONTROL_DT to prevent NVST encoder overload (NVST_R_BUSY)
             elapsed = time.monotonic() - t_step_start
             if elapsed < CONTROL_DT:
