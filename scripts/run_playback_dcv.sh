@@ -1,6 +1,16 @@
 #!/bin/bash
 set -e
 
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SESSION_DISPLAY="${DISPLAY:-}"
+SESSION_XAUTHORITY="${XAUTHORITY:-}"
+if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+	set -a
+	# shellcheck disable=SC1091
+	source "${PROJECT_ROOT}/.env"
+	set +a
+fi
+
 S3_BUCKET="g1-gr00t-models-380421147972-us-east-1-an"
 TASK_ID="${1:-g1_handover_teacher}"
 PLAYBACK_MODE="${2:-policy}"
@@ -13,12 +23,16 @@ if [[ "${PLAYBACK_MODE}" != "policy" && "${PLAYBACK_MODE}" != "motion" ]]; then
 	exit 1
 fi
 
-if [[ -z "${DISPLAY:-}" ]]; then
-	echo "DISPLAY is not set. Run this script from a terminal inside the DCV desktop session."
-	exit 1
+if [[ -n "${SESSION_DISPLAY}" ]]; then
+	export DISPLAY="${SESSION_DISPLAY}"
+elif [[ -z "${DISPLAY:-}" ]]; then
+	export DISPLAY=:0
 fi
 
-if [[ -z "${XAUTHORITY:-}" ]]; then
+if [[ -n "${SESSION_XAUTHORITY}" ]]; then
+	export XAUTHORITY="${SESSION_XAUTHORITY}"
+
+elif [[ -z "${XAUTHORITY:-}" ]]; then
 	DCV_XAUTHORITY="/run/user/$(id -u)/dcv/gui.xauth"
 	if [[ -f "${DCV_XAUTHORITY}" ]]; then
 		export XAUTHORITY="${DCV_XAUTHORITY}"

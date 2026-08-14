@@ -29,6 +29,8 @@ parser.add_argument(
 )
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+args_cli.headless = False
+args_cli.visualizer_intent = {"has_any_visualizers": True, "has_kit_visualizer": True}
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -48,6 +50,8 @@ def _safe_render(env) -> None:
     render_fn = getattr(render_target, "render", None)
     if callable(render_fn):
         render_fn()
+    # Keep the Isaac Sim Kit viewport responsive when optional visualizer Extras are absent.
+    simulation_app.update()
 
 
 def _resolve_checkpoint_path(checkpoint: str) -> Path:
@@ -129,7 +133,7 @@ def main():
 
     print("Creating playback environment...", flush=True)
     # Keep rendering attached to the DCV desktop window.
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode=None, disable_env_checker=True)
+    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array", disable_env_checker=True)
 
     if args_cli.mode == "motion":
         print(f"TASK_ID: {TASK_ID}", flush=True)
@@ -287,7 +291,12 @@ def main():
                 time.sleep(CONTROL_DT - elapsed)
             step_index += 1
             if step_index % 60 == 0:
-                print(f"  playback step {step_index}", flush=True)
+                max_action = float(actions.abs().max().item())
+                mean_action = float(actions.abs().mean().item())
+                print(
+                    f"  playback step {step_index} | max_action={max_action:.3f} | mean_action={mean_action:.3f}",
+                    flush=True,
+                )
             if bool(dones.any().item()):
                 if args_cli.loop:
                     env.reset()

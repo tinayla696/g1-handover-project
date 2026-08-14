@@ -157,13 +157,14 @@ services:
     container_name: isaac-sim-groot
     user: "0:0"
     network_mode: host
+    ipc: host
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu]
+              capabilities: [gpu, utility, compute, graphics, display, video]
     environment:
       - ACCEPT_EULA=Y
       - TASK_ID=${TASK_ID:-g1_handover_teacher}
@@ -188,7 +189,6 @@ services:
       --checkpoint ${PLAYBACK_CHECKPOINT}
       --mode ${PLAYBACK_MODE:-policy}
       --loop
-      --enable_cameras
       --kit_args "--/app/window/enabled=true --/app/window/visible=true --/app/window/noWindowMode=false --/app/window/fullscreen=false --/app/window/alwaysOnTop=true --/app/window/width=1600 --/app/window/height=900 --/renderer/multiGpu/enabled=false"
 
   isaac-sim-kinematic:
