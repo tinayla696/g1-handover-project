@@ -1,8 +1,34 @@
 #!/bin/bash
 set -e
 
-if [[ -z "${DISPLAY:-}" ]]; then
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SESSION_DISPLAY="${DISPLAY:-}"
+SESSION_XAUTHORITY="${XAUTHORITY:-}"
+if [[ -f "${PROJECT_ROOT}/.env" ]]; then
+	set -a
+	# shellcheck disable=SC1091
+	source "${PROJECT_ROOT}/.env"
+	set +a
+fi
+
+if [[ -n "${SESSION_DISPLAY}" ]]; then
+	export DISPLAY="${SESSION_DISPLAY}"
+elif [[ -z "${DISPLAY:-}" ]]; then
 	export DISPLAY=:0
+fi
+
+if [[ -n "${SESSION_XAUTHORITY}" ]]; then
+	export XAUTHORITY="${SESSION_XAUTHORITY}"
+elif [[ -z "${XAUTHORITY:-}" ]]; then
+	DCV_XAUTHORITY="/run/user/$(id -u)/dcv/gui.xauth"
+	if [[ -f "${DCV_XAUTHORITY}" ]]; then
+		export XAUTHORITY="${DCV_XAUTHORITY}"
+	elif [[ -f "${HOME}/.Xauthority" ]]; then
+		export XAUTHORITY="${HOME}/.Xauthority"
+	else
+		echo "XAUTHORITY is not set and no DCV or home Xauthority file exists."
+		exit 1
+	fi
 fi
 
 if [[ -z "${XAUTHORITY:-}" ]]; then

@@ -248,5 +248,6 @@ services:
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/scripts/dcv_gui_popup.py
-      --seconds ${DCV_GUI_SECONDS:-30}
-      --kit_args "--/app/window/enabled=true --/app/window/visible=true --/app/window/noWindowMode=false --/app/window/fullscreen=false --/app/window/width=1600 --/app/window/height=900"
+      --seconds ${DCV_GUI_SECONDS:-120}
+      --viz kit
+      --kit_args "--/app/window/enabled=true --/app/window/visible=true --/app/window/noWindowMode=false --/app/window/fullscreen=false --/app/window/alwaysOnTop=true --/app/window/width=1600 --/app/window/height=900 --/renderer/multiGpu/enabled=false"

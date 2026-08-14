@@ -8,14 +8,12 @@
 ssh -L 8443:localhost:8443 avita-g5.24
 ```
 
-DCV Clientは `localhost:8443` に接続します。DCV接続後、EC2上でGPU描画を確認します。
+DCV Clientは `localhost:8443` に接続します。DCV接続後、DCVデスクトップ内のTerminalでGPU描画を確認します。`DISPLAY` と `XAUTHORITY` は現在のセッション値を使用します。
 
 ```bash
-sudo XAUTHORITY=/run/user/127/gdm/Xauthority DISPLAY=:0 xhost +
-sudo cp /run/user/127/gdm/Xauthority "$HOME/.Xauthority"
-sudo chown "$(id -u):$(id -g)" "$HOME/.Xauthority"
-export DISPLAY=:0
-export XAUTHORITY="$HOME/.Xauthority"
+echo "DISPLAY=$DISPLAY"
+echo "XAUTHORITY=$XAUTHORITY"
+xdpyinfo -display "$DISPLAY" >/dev/null
 glxinfo | grep -E "OpenGL vendor|OpenGL renderer"
 ```
 

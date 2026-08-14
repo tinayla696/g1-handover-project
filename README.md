@@ -76,14 +76,16 @@ chmod +x run_env.sh
 3. DCV上のターミナルで `./scripts/check_dcv_environment.sh` を実行。
 
 
-WebRTC Client で固着する場合は、DCVデスクトップへ接続し、DCV内のターミナルからIsaac Simを起動してください。Isaac SimのウィンドウはDCVのX11画面へ直接表示されます。
+WebRTCは使用せず、DCVデスクトップ内のターミナルからIsaac Simを起動してください。Isaac SimのウィンドウはDCVのX11画面へ直接表示されます。
 
 ```bash
-echo "$DISPLAY"                         # 例: :1 または :2
+echo "DISPLAY=$DISPLAY"
+echo "XAUTHORITY=$XAUTHORITY"
 export XAUTHORITY="${XAUTHORITY:-/run/user/$(id -u)/dcv/gui.xauth}"
 echo "$XAUTHORITY"
 xdpyinfo -display "$DISPLAY" >/dev/null && echo "X display OK"
 chmod +x scripts/run_playback_dcv.sh
+./scripts/run_dcv_gui_check.sh
 ./scripts/run_playback_dcv.sh g1_handover_teacher policy
 ```
 

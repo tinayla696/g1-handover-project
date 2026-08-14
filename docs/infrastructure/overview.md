@@ -22,7 +22,7 @@ Isaac Lab のデフォルトの全部入りインストール（`--install`）�
 
 ### NICE DCV + NVIDIA GPU GUI再生
 
-WebRTC Clientを使わず、NICE DCVのGUI上でIsaac Simを操作する場合は、SSHトンネルとGDMのXauthorityを使用します。
+WebRTC Clientを使わず、NICE DCVのGUI上でIsaac Simを操作する場合は、SSHトンネルとDCVセッションのXauthorityを使用します。
 
 ```bash
 ssh -L 8443:localhost:8443 avita-g5.24
@@ -31,11 +31,9 @@ ssh -L 8443:localhost:8443 avita-g5.24
 DCV Clientは `localhost:8443` に接続します。DCV接続後、EC2上で以下を実行します。
 
 ```bash
-sudo XAUTHORITY=/run/user/127/gdm/Xauthority DISPLAY=:0 xhost +
-sudo cp /run/user/127/gdm/Xauthority "$HOME/.Xauthority"
-sudo chown "$(id -u):$(id -g)" "$HOME/.Xauthority"
-export XAUTHORITY="$HOME/.Xauthority"
-export DISPLAY=:0
+echo "DISPLAY=$DISPLAY"
+echo "XAUTHORITY=$XAUTHORITY"
+xdpyinfo -display "$DISPLAY" >/dev/null
 glxinfo | grep -E "OpenGL vendor|OpenGL renderer"
 ```
 
@@ -43,6 +41,8 @@ glxinfo | grep -E "OpenGL vendor|OpenGL renderer"
 
 ```bash
 ./scripts/check_dcv_environment.sh
+./scripts/run_dcv_gui_check.sh
+./scripts/run_playback_dcv.sh g1_handover_teacher motion
 ./scripts/run_playback_dcv.sh g1_handover_teacher policy
 ```
 
