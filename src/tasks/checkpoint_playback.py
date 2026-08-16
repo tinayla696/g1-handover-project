@@ -353,6 +353,11 @@ def main():
                 if right_finger_indices and grasped:
                     target_joint_pos[:, right_finger_indices] = FINGER_TARGET_ANGLE
 
+                release_step = int(motion_buffer.shape[0] * release_fraction)
+                pre_release_step = max(0, release_step - 10)
+                if right_finger_indices and grasped and pre_release_step <= step_index < release_step:
+                    target_joint_pos[:, right_finger_indices] = 0.0
+
                 # Motion replay uses absolute trajectory targets. Do not clamp to [-1, 1],
                 # otherwise the 0.05 action scale compresses large arm motions to near-static output.
                 raw_action = (target_joint_pos - default_joint_pos) / action_scale
@@ -376,7 +381,6 @@ def main():
                     novelty.write_root_pose_to_sim(novelty_pose_buffer)
                     _write_root_velocity_to_sim(novelty, zero_root_velocity)
 
-                release_step = int(motion_buffer.shape[0] * release_fraction)
                 if grasped and grasp_step is not None and step_index >= max(release_step, grasp_step + 30):
                     if novelty is not None and hand_body_index is not None:
                         hand_velocity = robot.data.body_state_w.torch[:, hand_body_index, 7:13]
