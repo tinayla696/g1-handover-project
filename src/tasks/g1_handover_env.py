@@ -299,6 +299,12 @@ def object_approach_reward(
     handover_error = torch.linalg.norm(object_pos - target_pos, dim=-1)
     return torch.exp(-approach_error / std) + 0.5 * torch.exp(-handover_error / (std * 1.5))
 
+
+def episode_length_ratio(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Return normalized episode progress for time-dependent motion tracking."""
+    max_episode_length = max(int(env.max_episode_length), 1)
+    return (env.episode_length_buf.float() / max_episode_length).unsqueeze(-1)
+
 @configclass
 class G1HandoverSceneCfg(InteractiveSceneCfg):
     """シミュレーションステージ上の配置定義"""
@@ -319,7 +325,11 @@ class G1HandoverSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.CuboidCfg(
             size=(0.8, 0.6, 0.7),
             rigid_props=RigidBodyPropertiesCfg(kinematic_enabled=True, disable_gravity=True),
-            collision_props=sim_utils.CollisionPropertiesCfg(),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=True,
+                contact_offset=0.02,
+                rest_offset=0.005,
+            ),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.55, 0.35, 0.2)),
         ),
     )
@@ -327,11 +337,17 @@ class G1HandoverSceneCfg(InteractiveSceneCfg):
     # ノベルティ（500mlペットボトルを模した円柱）
     novelty = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Novelty",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.4, 0.0, 0.8), rot=(1.0, 0.0, 0.0, 0.0)),
+        # Keep the cylinder slightly above the counter top so the initial contact is resolved robustly.
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.4, 0.0, 0.81), rot=(1.0, 0.0, 0.0, 0.0)),
         spawn=sim_utils.CylinderCfg(
             radius=0.035, height=0.2,
             rigid_props=RigidBodyPropertiesCfg(),
             mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=True,
+                contact_offset=0.02,
+                rest_offset=0.005,
+            ),
             visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.8, 0.0)),
         ),
     )
@@ -346,6 +362,7 @@ class G1HandoverObservationCfg:
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         actions = ObsTerm(func=mdp.last_action)
+        motion_phase = ObsTerm(func=episode_length_ratio)
 
         def __post_init__(self):
             self.enable_corruption = False

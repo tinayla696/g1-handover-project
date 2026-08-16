@@ -102,6 +102,7 @@ def _load_npz_motion(npz_path: Path, joint_count: int) -> np.ndarray:
         "joint_pos",
         "joint_positions",
         "qpos",
+        "posed_joints",
         "positions",
         "motion",
         "data",
@@ -254,7 +255,10 @@ def main():
         payload = np.load(npz_path, allow_pickle=True)
         if "joint_names" in payload:
             motion_joint_names = [str(n) for n in np.asarray(payload["joint_names"]).tolist()]
-        raw_key = next((k for k in ("joint_positions", "joint_pos", "joint_position", "qpos", "positions") if k in payload), None)
+        raw_key = next(
+            (k for k in ("joint_positions", "joint_pos", "joint_position", "posed_joints", "qpos", "positions") if k in payload),
+            None,
+        )
         if raw_key is None and len(payload.files) == 1:
             raw_key = payload.files[0]
         raw_frames = np.asarray(payload[raw_key], dtype=np.float32) if raw_key else None

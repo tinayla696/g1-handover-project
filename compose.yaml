@@ -33,16 +33,18 @@ services:
     container_name: isaac-sim-groot
     user: "0:0"
     network_mode: host
+    ipc: host
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [gpu]
+              capabilities: [gpu, utility, compute]
     environment:
       - ACCEPT_EULA=Y
       - TASK_ID=${TASK_ID:-g1_handover_base}
+      - NUM_ENVS=${NUM_ENVS:-512}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
@@ -52,7 +54,7 @@ services:
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
       --task G1-Handover-v0
-      --num_envs 512
+      --num_envs ${NUM_ENVS:-512}
 
   isaac-sim-visual-check:
     profiles: ["visual-check"]
@@ -158,6 +160,7 @@ services:
     user: "0:0"
     network_mode: host
     ipc: host
+    shm_size: "16gb"
     deploy:
       resources:
         reservations:
@@ -170,6 +173,9 @@ services:
       - TASK_ID=${TASK_ID:-g1_handover_teacher}
       - PLAYBACK_CHECKPOINT=${PLAYBACK_CHECKPOINT}
       - PLAYBACK_MODE=${PLAYBACK_MODE:-policy}
+      - PLAYBACK_MAX_EPISODES=${PLAYBACK_MAX_EPISODES:-1}
+      - PLAYBACK_MAX_STEPS=${PLAYBACK_MAX_STEPS:--1}
+      - MOTION_DIR=/workspace/g1-handover-project/data/motions/HandOver7
       - DISPLAY=${DISPLAY:-:0}
       - XAUTHORITY=/root/.Xauthority
       - NVIDIA_DRIVER_CAPABILITIES=all
@@ -189,6 +195,9 @@ services:
       --checkpoint ${PLAYBACK_CHECKPOINT}
       --mode ${PLAYBACK_MODE:-policy}
       --loop
+      --max_episodes ${PLAYBACK_MAX_EPISODES:-1}
+      --max_steps ${PLAYBACK_MAX_STEPS:--1}
+      --playback_speed ${PLAYBACK_SPEED:-1.0}
       --kit_args "--/app/window/enabled=true --/app/window/visible=true --/app/window/noWindowMode=false --/app/window/fullscreen=false --/app/window/alwaysOnTop=true --/app/window/width=1600 --/app/window/height=900 --/renderer/multiGpu/enabled=false"
 
   isaac-sim-kinematic:
