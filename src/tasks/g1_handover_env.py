@@ -12,6 +12,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils.configclass import configclass
 
@@ -154,7 +155,7 @@ class MotionBufferManager:
         if "joint_names" in payload:
             cls._joint_names = [str(n) for n in np.asarray(payload["joint_names"]).tolist()]
 
-        candidate_keys = ("joint_positions", "joint_pos", "joint_position", "qpos", "positions")
+        candidate_keys = ("joint_positions", "joint_pos", "joint_position", "posed_joints", "qpos", "positions")
         joints = None
         for key in candidate_keys:
             if key in payload:
@@ -291,13 +292,65 @@ def object_approach_reward(
     robot = env.scene[robot_cfg.name]
     novelty = env.scene[object_cfg.name]
 
-    robot_pos = robot.data.root_pos_w.torch
+    robot_body_index = _find_right_hand_body_index(robot)
+    robot_pos = robot.data.body_state_w.torch[:, robot_body_index, :3]
     object_pos = novelty.data.root_pos_w.torch
     target_pos = torch.tensor((0.88, 0.0, 1.02), dtype=object_pos.dtype, device=object_pos.device)
 
     approach_error = torch.linalg.norm(robot_pos - object_pos, dim=-1)
     handover_error = torch.linalg.norm(object_pos - target_pos, dim=-1)
     return torch.exp(-approach_error / std) + 0.5 * torch.exp(-handover_error / (std * 1.5))
+
+
+def _find_right_hand_body_index(robot) -> int:
+    for index, name in enumerate(robot.body_names):
+        if name == "right_hand_palm_link":
+            return index
+    for index, name in enumerate(robot.body_names):
+        if "right" in name.lower() and ("palm" in name.lower() or "hand" in name.lower()):
+            return index
+    raise RuntimeError("Could not find a right-hand palm/hand body on the G1 articulation.")
+
+
+def object_relative_pos(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Return PET position relative to the right palm in world-aligned coordinates."""
+    robot = env.scene["robot"]
+    novelty = env.scene["novelty"]
+    hand_index = _find_right_hand_body_index(robot)
+    hand_pos = robot.data.body_state_w.torch[:, hand_index, :3]
+    return novelty.data.root_pos_w.torch - hand_pos
+
+
+class ResidualJointPositionAction(mdp.JointPositionAction):
+    """Apply HandOver7 joint targets plus a bounded learned residual."""
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        motion_buffer = MotionBufferManager.get_buffer()
+        self._motion_buffer = motion_buffer.to(self.device)
+        source_names = MotionBufferManager._joint_names or []
+        source_index = {name: index for index, name in enumerate(source_names)}
+        aliases = {"torso_joint": "waist_pitch_joint"}
+        self._source_indices = torch.full((self.action_dim,), -1, dtype=torch.long, device=self.device)
+        for action_index, joint_name in enumerate(self._joint_names):
+            source_name = joint_name if joint_name in source_index else aliases.get(joint_name)
+            if source_name in source_index:
+                self._source_indices[action_index] = source_index[source_name]
+
+    def process_actions(self, actions: torch.Tensor):
+        self._raw_actions[:] = actions
+        step_ids = self._env.episode_length_buf.long().clamp(max=self._motion_buffer.shape[0] - 1)
+        base = torch.zeros_like(self._processed_actions)
+        valid = self._source_indices >= 0
+        if bool(valid.any().item()):
+            base[:, valid] = self._motion_buffer[step_ids][:, self._source_indices[valid]]
+        self._processed_actions[:] = base + self._raw_actions * self._scale
+
+
+@configclass
+class ResidualJointPositionActionCfg(mdp.JointPositionActionCfg):
+    class_type: type[ResidualJointPositionAction] | str = "{DIR}.g1_handover_env:ResidualJointPositionAction"
+    use_default_offset: bool = False
 
 
 def episode_length_ratio(env: ManagerBasedRLEnv) -> torch.Tensor:
@@ -372,6 +425,7 @@ class G1HandoverObservationCfg:
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         actions = ObsTerm(func=mdp.last_action)
         motion_phase = ObsTerm(func=episode_length_ratio)
+        object_relative_pos = ObsTerm(func=object_relative_pos)
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -391,8 +445,8 @@ class G1HandoverRewardsCfg:
     motion_tracking = RewTerm(func=motion_tracking_reward, weight=3.0, params={"std": 2.0})
     object_approach = RewTerm(
         func=object_approach_reward,
-        weight=1.0,
-        params={"std": 0.3, "robot_cfg": SceneEntityCfg("robot"), "object_cfg": SceneEntityCfg("novelty")},
+        weight=10.0,
+        params={"std": 0.1, "robot_cfg": SceneEntityCfg("robot"), "object_cfg": SceneEntityCfg("novelty")},
     )
 
 
@@ -400,11 +454,25 @@ class G1HandoverRewardsCfg:
 class G1HandoverActionsCfg:
     """ロボットへのアクション（制御命令）の定義"""
 
-    joint_pos = mdp.JointPositionActionCfg(
+    joint_pos = ResidualJointPositionActionCfg(
         asset_name="robot",
         joint_names=[".*"],
         scale=0.05,
-        use_default_offset=True,
+    )
+
+
+@configclass
+class G1HandoverEventCfg:
+    """Reset-time PET placement randomization for residual learning."""
+
+    reset_novelty_pose = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.04, 0.04), "y": (-0.04, 0.04), "z": (-0.02, 0.02)},
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("novelty"),
+        },
     )
 
 
@@ -424,6 +492,7 @@ class G1HandoverEnvCfg(ManagerBasedRLEnvCfg):
     scene: G1HandoverSceneCfg = G1HandoverSceneCfg(num_envs=512, env_spacing=2.5)
     observations: G1HandoverObservationCfg = G1HandoverObservationCfg()
     actions: G1HandoverActionsCfg = G1HandoverActionsCfg()
+    events: G1HandoverEventCfg = G1HandoverEventCfg()
     rewards: G1HandoverRewardsCfg = G1HandoverRewardsCfg()
     terminations: G1HandoverTerminationsCfg = G1HandoverTerminationsCfg()
 
@@ -447,7 +516,7 @@ from isaaclab_rl.rsl_rl import RslRlMLPModelCfg, RslRlOnPolicyRunnerCfg, RslRlPp
 @configclass
 class G1HandoverPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 5000
+    max_iterations = 2000
     save_interval = 100
     experiment_name = "g1_handover_teacher"
     empirical_normalization = False

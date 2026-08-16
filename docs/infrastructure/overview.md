@@ -4,6 +4,21 @@
 
 ## 🐳 コンテナ設計方針
 
+### Residual RL移行
+
+決定論的なPET手渡しbaselineは`checkpoint_playback.py --mode motion`に保持し、学習側だけを
+Residual RLへ切り替えます。Residual actionはHandOver7の基準関節軌道に`0.05 * Δq`を加え、
+policy観測には`motion_phase`と右手掌からPETへの`object_relative_pos`を含めます。PET初期位置は
+resetごとにx/y±4cm、z±2cmでランダム化します。
+
+現行コードは単一プロセスのRSL-RL実行なので、まず以下で学習します。
+
+```bash
+NUM_ENVS=512 ./run_env.sh train g1_handover_residual
+```
+
+学習済み残差policyの評価は、既存baselineと分けて行います。baselineを壊さないため、
+`--mode motion`は常に教師軌道＋決定論的把持、`--mode policy`は残差policy推論用です。
 環境のポータビリティを担保するため、ホストOS側には最小限の依存（NVIDIA Driver、Docker、AWS CLI）のみを要求し、それ以外のすべてのセットアップをコンテナ起動時に動的に処理します。
 
 ### 🚨 依存衝突の完全回避（開発ルール）
