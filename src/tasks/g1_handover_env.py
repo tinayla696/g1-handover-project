@@ -337,18 +337,27 @@ class G1HandoverSceneCfg(InteractiveSceneCfg):
     # ノベルティ（500mlペットボトルを模した円柱）
     novelty = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Novelty",
-        # Keep the cylinder slightly above the counter top so the initial contact is resolved robustly.
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.4, 0.0, 0.81), rot=(1.0, 0.0, 0.0, 0.0)),
+        # Align the PET bottle with the measured right-hand approach path.
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.249, -0.065, 0.965), rot=(1.0, 0.0, 0.0, 0.0)),
         spawn=sim_utils.CylinderCfg(
-            radius=0.035, height=0.2,
+            radius=0.032, height=0.21,
             rigid_props=RigidBodyPropertiesCfg(),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.5),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.15),
             collision_props=sim_utils.CollisionPropertiesCfg(
                 collision_enabled=True,
                 contact_offset=0.02,
                 rest_offset=0.005,
             ),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.8, 0.0)),
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                static_friction=1.5,
+                dynamic_friction=1.2,
+                restitution=0.05,
+            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(0.1, 0.7, 0.9),
+                roughness=0.1,
+                metallic=0.1,
+            ),
         ),
     )
 

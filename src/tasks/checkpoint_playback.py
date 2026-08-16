@@ -13,9 +13,9 @@ TASK_ID = os.getenv("TASK_ID", "g1_handover_base")
 LOGS_MOUNT_ROOT = Path(os.getenv("LOGS_MOUNT_ROOT", "/workspace/g1-handover-project/logs"))
 MOTION_DIR = Path(os.getenv("MOTION_DIR", "data/motions/HandOver7"))
 CONTROL_DT = 0.02
-GRASP_DISTANCE = float(os.getenv("GRASP_DISTANCE", "0.22"))
-FINGER_TARGET_ANGLE = float(os.getenv("FINGER_TARGET_ANGLE", "1.2"))
-ATTACH_OFFSET = (0.0, 0.0, 0.02)
+GRASP_DISTANCE = float(os.getenv("GRASP_DISTANCE", "0.08"))
+FINGER_TARGET_ANGLE = float(os.getenv("FINGER_TARGET_ANGLE", "1.3"))
+ATTACH_OFFSET = (0.0, 0.02, -0.01)
 RELEASE_FRACTION = float(os.getenv("RELEASE_FRACTION", "0.90"))
 
 parser = argparse.ArgumentParser(description="Play back a trained G1 Handover checkpoint.")
@@ -264,6 +264,7 @@ def main():
         root_pose_buffer = torch.empty((1, 7), dtype=torch.float32, device=robot.device)
         zero_root_velocity = torch.zeros((1, 6), dtype=torch.float32, device=robot.device)
         novelty_pose_buffer = torch.empty((1, 7), dtype=torch.float32, device=robot.device)
+        novelty_initial_pose = novelty.data.root_state_w.torch[:, :7].clone() if novelty is not None else None
         action_scale = float(getattr(env_unwrapped.cfg.actions.joint_pos, "scale", 1.0))
         action_scale = max(action_scale, 1e-6)
 
@@ -322,6 +323,10 @@ def main():
                 if bool(valid.any().item()):
                     target_joint_pos[:, valid] = frame[mapped_source_indices[valid]].unsqueeze(0)
 
+                if not grasped and not released and novelty is not None and novelty_initial_pose is not None:
+                    novelty.write_root_pose_to_sim(novelty_initial_pose)
+                    _write_root_velocity_to_sim(novelty, zero_root_velocity)
+
                 if not grasped and not released and novelty is not None and hand_body_index is not None:
                     hand_position = robot.data.body_state_w.torch[:, hand_body_index, :3]
                     novelty_position = novelty.data.root_pos_w.torch
@@ -330,7 +335,9 @@ def main():
                     if step_index % 30 == 0:
                         print(
                             f"  [DISTANCE] step={step_index} | hand-novelty dist={float(distance.min().item()):.4f}m "
-                            f"threshold={grasp_distance:.3f}m",
+                            f"threshold={grasp_distance:.3f}m | "
+                            f"hand_pos=({hand_position[0, 0].item():.3f}, {hand_position[0, 1].item():.3f}, "
+                            f"{hand_position[0, 2].item():.3f})",
                             flush=True,
                         )
                     if bool((distance < grasp_distance).any().item()):
@@ -371,6 +378,9 @@ def main():
 
                 release_step = int(motion_buffer.shape[0] * release_fraction)
                 if grasped and grasp_step is not None and step_index >= max(release_step, grasp_step + 30):
+                    if novelty is not None and hand_body_index is not None:
+                        hand_velocity = robot.data.body_state_w.torch[:, hand_body_index, 7:13]
+                        _write_root_velocity_to_sim(novelty, hand_velocity)
                     grasped = False
                     released = True
                     release_count += 1
