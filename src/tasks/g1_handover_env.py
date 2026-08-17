@@ -126,6 +126,31 @@ MOTION_INIT_EXCLUDED_JOINTS = {
     "right_two_joint",
 }
 
+
+def _write_root_pose_to_sim(robot, root_pose: torch.Tensor) -> None:
+    """Write a root pose using the current Isaac Lab articulation API."""
+    writer = getattr(robot, "write_root_link_pose_to_sim", None)
+    if callable(writer):
+        writer(root_pose)
+        return
+    writer = getattr(robot, "write_root_pose_to_sim", None)
+    if callable(writer):
+        writer(root_pose)
+        return
+    raise RuntimeError("Robot articulation does not expose a root pose write API.")
+
+
+def _write_root_velocity_to_sim(asset, root_velocity: torch.Tensor) -> None:
+    """Clear root linear and angular velocity when a pose is kinematically applied."""
+    writer = getattr(asset, "write_root_velocity_to_sim", None)
+    if callable(writer):
+        writer(root_velocity)
+        return
+    writer = getattr(asset, "write_root_com_velocity_to_sim", None)
+    if callable(writer):
+        writer(root_velocity)
+
+
 class MotionBufferManager:
     """Load HandOver7 and resample it to the policy control frequency."""
 
@@ -184,6 +209,70 @@ class MotionBufferManager:
         cls._buffer = torch.tensor(resampled, dtype=torch.float32)
         print(f"✓ [MotionBuffer] Resampled HandOver7 to {1.0 / control_dt:.1f}Hz: {tuple(cls._buffer.shape)}, joint_names: {len(cls._joint_names) if cls._joint_names else 'N/A'}")
         return cls._buffer
+
+
+class RootPoseBufferManager:
+    """Load the HandOver7 root trajectory for kinematic root locking."""
+
+    _positions: torch.Tensor | None = None
+    _quaternions: torch.Tensor | None = None
+
+    @classmethod
+    def get_buffer(cls, motion_dir: Path = MOTION_DIR, control_dt: float = CONTROL_DT) -> tuple[torch.Tensor, torch.Tensor]:
+        if cls._positions is not None and cls._quaternions is not None:
+            return cls._positions, cls._quaternions
+
+        npz_path = motion_dir / "HandOver7_unitree_g1.npz"
+        if not npz_path.exists():
+            npz_path = motion_dir / "HandOver7.npz"
+        if not npz_path.exists():
+            cls._positions = torch.zeros((1, 3), dtype=torch.float32)
+            cls._quaternions = torch.zeros((1, 4), dtype=torch.float32)
+            cls._quaternions[:, 3] = 1.0
+            return cls._positions, cls._quaternions
+
+        payload = np.load(npz_path, allow_pickle=True)
+        fps = float(np.asarray(payload["fps"]).item()) if "fps" in payload else 30.0
+        num_frames = int(np.asarray(payload["root_position"]).shape[0]) if "root_position" in payload else 1
+
+        root_position = None
+        if "root_position" in payload:
+            raw_root_position = np.asarray(payload["root_position"], dtype=np.float32)
+            if raw_root_position.ndim == 2 and raw_root_position.shape[1] == 3:
+                t_orig = np.linspace(0.0, max((num_frames - 1) / max(fps, 1e-6), control_dt), num_frames, dtype=np.float32)
+                t_target = np.arange(0.0, max((num_frames - 1) / max(fps, 1e-6), control_dt) + 1e-9, control_dt, dtype=np.float32)
+                root_position = np.empty((t_target.shape[0], 3), dtype=np.float32)
+                for i in range(3):
+                    root_position[:, i] = np.interp(t_target, t_orig, raw_root_position[:, i])
+
+        root_quaternion = None
+        if "root_quaternion_wxyz" in payload:
+            raw_root_quaternion = np.asarray(payload["root_quaternion_wxyz"], dtype=np.float32)
+            if raw_root_quaternion.ndim == 2 and raw_root_quaternion.shape[1] == 4:
+                if root_position is None:
+                    num_frames = raw_root_quaternion.shape[0]
+                    duration = max((num_frames - 1) / max(fps, 1e-6), control_dt)
+                    t_orig = np.linspace(0.0, duration, num_frames, dtype=np.float32)
+                    t_target = np.arange(0.0, duration + 1e-9, control_dt, dtype=np.float32)
+                else:
+                    t_orig = np.linspace(0.0, max((num_frames - 1) / max(fps, 1e-6), control_dt), num_frames, dtype=np.float32)
+                    t_target = np.arange(0.0, max((num_frames - 1) / max(fps, 1e-6), control_dt) + 1e-9, control_dt, dtype=np.float32)
+                root_quaternion = np.empty((t_target.shape[0], 4), dtype=np.float32)
+                for i in range(4):
+                    root_quaternion[:, i] = np.interp(t_target, t_orig, raw_root_quaternion[:, i])
+                norms = np.linalg.norm(root_quaternion, axis=1, keepdims=True)
+                root_quaternion = root_quaternion / np.maximum(norms, 1e-8)
+                root_quaternion = root_quaternion[:, [1, 2, 3, 0]]
+
+        if root_position is None:
+            root_position = np.zeros((1, 3), dtype=np.float32)
+        if root_quaternion is None:
+            root_quaternion = np.tile(np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32), (root_position.shape[0], 1))
+
+        cls._positions = torch.tensor(root_position, dtype=torch.float32)
+        cls._quaternions = torch.tensor(root_quaternion, dtype=torch.float32)
+        print(f"✓ [RootPoseBuffer] Loaded root trajectory: {tuple(cls._positions.shape)}", flush=True)
+        return cls._positions, cls._quaternions
 
 
 def _project_motion_initial_pose(motion_frame: torch.Tensor) -> dict[str, float]:
@@ -336,6 +425,14 @@ class ResidualJointPositionAction(mdp.JointPositionAction):
             source_name = joint_name if joint_name in source_index else aliases.get(joint_name)
             if source_name in source_index:
                 self._source_indices[action_index] = source_index[source_name]
+        self._scale = torch.full((self.num_envs, self.action_dim), float(cfg.scale), device=self.device)
+        right_arm_indices = [
+            action_index
+            for action_index, joint_name in enumerate(self._joint_names)
+            if joint_name.startswith(("right_shoulder_", "right_elbow_"))
+        ]
+        if right_arm_indices:
+            self._scale[:, right_arm_indices] = 0.10
 
     def process_actions(self, actions: torch.Tensor):
         self._raw_actions[:] = actions
@@ -345,6 +442,38 @@ class ResidualJointPositionAction(mdp.JointPositionAction):
         if bool(valid.any().item()):
             base[:, valid] = self._motion_buffer[step_ids][:, self._source_indices[valid]]
         self._processed_actions[:] = base + self._raw_actions * self._scale
+
+
+class G1HandoverResidualKinematicEnv(ManagerBasedRLEnv):
+    """Phase 1 curriculum: lock the root pose to the motion trajectory and learn only arm correction."""
+
+    def __init__(self, cfg: ManagerBasedRLEnvCfg, *args, **kwargs):
+        super().__init__(cfg, *args, **kwargs)
+        self._root_positions, self._root_quaternions = RootPoseBufferManager.get_buffer()
+
+    def _sync_root_pose(self):
+        robot = self.scene["robot"]
+        if not hasattr(robot, "body_names"):
+            return
+        if self._root_positions is None or self._root_quaternions is None:
+            return
+        step_ids = self.episode_length_buf.long().clamp(max=self._root_positions.shape[0] - 1)
+        root_pose = torch.zeros((self.scene.num_envs, 7), device=self.device, dtype=torch.float32)
+        root_pose[:, :3] = self._root_positions.to(self.device)[step_ids]
+        root_pose[:, 3:] = self._root_quaternions.to(self.device)[step_ids]
+        _write_root_pose_to_sim(robot, root_pose)
+        zero_root_velocity = torch.zeros((self.scene.num_envs, 6), device=self.device, dtype=torch.float32)
+        _write_root_velocity_to_sim(robot, zero_root_velocity)
+
+    def reset(self, *args, **kwargs):
+        obs, info = super().reset(*args, **kwargs)
+        self._sync_root_pose()
+        return obs, info
+
+    def step(self, actions):
+        obs, rew, terminated, truncated, info = super().step(actions)
+        self._sync_root_pose()
+        return obs, rew, terminated, truncated, info
 
 
 @configclass
@@ -446,7 +575,7 @@ class G1HandoverRewardsCfg:
     object_approach = RewTerm(
         func=object_approach_reward,
         weight=10.0,
-        params={"std": 0.1, "robot_cfg": SceneEntityCfg("robot"), "object_cfg": SceneEntityCfg("novelty")},
+        params={"std": 0.05, "robot_cfg": SceneEntityCfg("robot"), "object_cfg": SceneEntityCfg("novelty")},
     )
 
 
@@ -546,3 +675,25 @@ class G1HandoverPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class G1HandoverResidualKinematicTerminationsCfg:
+    time_out = DoneTerm(func=mdp.time_out, time_out=True)
+
+
+@configclass
+class G1HandoverResidualKinematicEnvCfg(G1HandoverEnvCfg):
+    scene: G1HandoverSceneCfg = G1HandoverSceneCfg(num_envs=2048, env_spacing=2.5)
+    terminations: G1HandoverResidualKinematicTerminationsCfg = G1HandoverResidualKinematicTerminationsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.episode_length_s = 20.0
+
+
+@configclass
+class G1HandoverResidualKinematicPPORunnerCfg(G1HandoverPPORunnerCfg):
+    max_iterations = 1000
+    save_interval = 100
+    experiment_name = "g1_handover_residual_kinematic"

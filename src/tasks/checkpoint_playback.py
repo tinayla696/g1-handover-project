@@ -474,6 +474,22 @@ def main():
 
     obs = env.get_observations()
     step_index = 0
+
+    scene = env.unwrapped.scene
+    robot = scene["robot"]
+    try:
+        novelty = scene["novelty"]
+    except KeyError:
+        novelty = None
+    hand_body_index = _find_body_index(robot, "right_hand_palm_link")
+
+    episode_index = 1
+    episode_step = 0
+    minimum_distance = float("inf")
+    grasp_count = 0
+    release_count = 0
+    grasped = False
+
     try:
         while simulation_app.is_running():
             t_step_start = time.monotonic()
@@ -481,24 +497,60 @@ def main():
                 actions = policy(obs)
                 obs, _, dones, _ = env.step(actions)
                 policy.reset(dones)
+
+            if novelty is not None and hand_body_index is not None:
+                hand_position = robot.data.body_state_w.torch[:, hand_body_index, :3]
+                novelty_position = novelty.data.root_pos_w.torch
+                distance = float(torch.linalg.norm(hand_position - novelty_position, dim=-1).min().item())
+                minimum_distance = min(minimum_distance, distance)
+                if not grasped and distance <= GRASP_DISTANCE:
+                    grasped = True
+                    grasp_count += 1
+                    print(f"[GRASP] step={step_index} dist={distance:.4f}m", flush=True)
+                # Hysteresis avoids counting a release from sensor noise around the threshold.
+                elif grasped and distance > GRASP_DISTANCE * 2.0:
+                    grasped = False
+                    release_count += 1
+                    print(f"[RELEASE] step={step_index} dist={distance:.4f}m", flush=True)
+
             # Explicit render keeps the DCV desktop window responsive.
             _safe_render(env)
             elapsed = time.monotonic() - t_step_start
             if elapsed < PLAYBACK_DT:
                 time.sleep(PLAYBACK_DT - elapsed)
             step_index += 1
+            episode_step += 1
             if step_index % 60 == 0:
                 max_action = float(actions.abs().max().item())
                 mean_action = float(actions.abs().mean().item())
                 print(
-                    f"  playback step {step_index} | max_action={max_action:.3f} | mean_action={mean_action:.3f}",
+                    f"  playback step {step_index} | max_action={max_action:.3f} | mean_action={mean_action:.3f}"
+                    f" | min_dist={minimum_distance:.4f}m",
                     flush=True,
                 )
             if bool(dones.any().item()):
-                if args_cli.loop:
+                print(
+                    f"[METRIC] episode={episode_index} reason=done steps={episode_step} "
+                    f"min_distance={minimum_distance:.4f}m grasp={grasp_count} release={release_count}",
+                    flush=True,
+                )
+                if args_cli.max_episodes == 0 or episode_index < args_cli.max_episodes:
                     env.reset()
                     obs = env.get_observations()
+                    episode_index += 1
+                    episode_step = 0
+                    minimum_distance = float("inf")
+                    grasp_count = 0
+                    release_count = 0
+                    grasped = False
                     continue
+                break
+            if args_cli.max_steps > 0 and episode_step >= args_cli.max_steps:
+                print(
+                    f"[METRIC] episode={episode_index} reason=max_steps steps={episode_step} "
+                    f"min_distance={minimum_distance:.4f}m grasp={grasp_count} release={release_count}",
+                    flush=True,
+                )
                 break
     finally:
         env.close()

@@ -25,6 +25,13 @@ S3_LOG_ROOT="s3://${S3_BUCKET}/logs/${TASK_ID}"
 
 export TASK_ID
 export VISUAL_CHECK_STEPS="${VISUAL_CHECK_STEPS:-7200}"
+export NUM_GPUS="${NUM_GPUS:-4}"
+
+if [[ "${RUN_PROFILE}" == "train" ]]; then
+	export NUM_ENVS="${NUM_ENVS:-512}"
+	export TRAIN_TASK="${TRAIN_TASK:-G1-Handover-v0}"
+	echo "🎛️  Distributed training: ${NUM_GPUS} GPUs × ${NUM_ENVS} envs/GPU"
+fi
 
 echo "🧩 Task ID: ${TASK_ID}"
 if [[ "${RUN_PROFILE}" == "visual-check" ]]; then

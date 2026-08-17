@@ -45,6 +45,9 @@ services:
       - ACCEPT_EULA=Y
       - TASK_ID=${TASK_ID:-g1_handover_base}
       - NUM_ENVS=${NUM_ENVS:-512}
+      - TRAIN_TASK=${TRAIN_TASK:-G1-Handover-v0}
+      - NUM_GPUS=${NUM_GPUS:-4}
+      - RESUME_CHECKPOINT=${RESUME_CHECKPOINT:-}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
@@ -52,9 +55,14 @@ services:
       - ./logs/${TASK_ID:-g1_handover_base}:/workspace/g1-handover-project/logs
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
     command: >
-      /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/train.py
-      --task G1-Handover-v0
+      /workspace/IsaacLab/isaaclab.sh -p -m torch.distributed.run
+      --standalone --nproc_per_node=${NUM_GPUS:-4}
+      /workspace/g1-handover-project/src/train.py
+      --task ${TRAIN_TASK:-G1-Handover-v0}
       --num_envs ${NUM_ENVS:-512}
+      --distributed
+      --headless
+      ${RESUME_CHECKPOINT:+--resume_checkpoint ${RESUME_CHECKPOINT}}
 
   isaac-sim-visual-check:
     profiles: ["visual-check"]
