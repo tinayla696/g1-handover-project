@@ -111,6 +111,7 @@ services:
       - TASK_ID=${TASK_ID:-g1_handover_base}
       - PLAYBACK_CHECKPOINT=${PLAYBACK_CHECKPOINT}
       - PLAYBACK_MODE=${PLAYBACK_MODE:-policy}
+      - PLAYBACK_TASK=${PLAYBACK_TASK:-G1-Handover-v0}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
@@ -118,7 +119,7 @@ services:
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/tasks/checkpoint_playback.py
-      --task G1-Handover-v0
+      --task ${PLAYBACK_TASK:-G1-Handover-v0}
       --num_envs 1
       --checkpoint ${PLAYBACK_CHECKPOINT}
       --mode ${PLAYBACK_MODE:-policy}
@@ -179,6 +180,7 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - TASK_ID=${TASK_ID:-g1_handover_teacher}
+      - PLAYBACK_TASK=${PLAYBACK_TASK:-G1-Handover-v0}
       - PLAYBACK_CHECKPOINT=${PLAYBACK_CHECKPOINT}
       - PLAYBACK_MODE=${PLAYBACK_MODE:-policy}
       - PLAYBACK_MAX_EPISODES=${PLAYBACK_MAX_EPISODES:-1}
@@ -189,6 +191,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=all
       - __GLX_VENDOR_LIBRARY_NAME=nvidia
       - __NV_PRIME_RENDER_OFFLOAD=1
+      - NVIDIA_VISIBLE_DEVICES=${PLAYBACK_GPU:-0}
     volumes:
       - ../IsaacLab:/workspace/IsaacLab
       - .:/workspace/g1-handover-project
@@ -198,7 +201,7 @@ services:
     entrypoint: ["/bin/bash", "/workspace/g1-handover-project/scripts/container_entrypoint.sh"]
     command: >
       /workspace/IsaacLab/isaaclab.sh -p /workspace/g1-handover-project/src/tasks/checkpoint_playback.py
-      --task G1-Handover-v0
+      --task ${PLAYBACK_TASK:-G1-Handover-v0}
       --num_envs 1
       --checkpoint ${PLAYBACK_CHECKPOINT}
       --mode ${PLAYBACK_MODE:-policy}

@@ -20,7 +20,7 @@ RELEASE_FRACTION = float(os.getenv("RELEASE_FRACTION", "0.90"))
 
 parser = argparse.ArgumentParser(description="Play back a trained G1 Handover checkpoint.")
 parser.add_argument("--task", type=str, default="G1-Handover-v0", help="Registered gym task name.")
-parser.add_argument("--checkpoint", type=str, required=True, help="Path to the trained model checkpoint.")
+parser.add_argument("--checkpoint", type=str, default="", help="Path to the trained model checkpoint (ignored in motion mode).")
 parser.add_argument("--seed", type=int, default=42, help="Seed for the playback run.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments; playback should be 1.")
 parser.add_argument("--loop", action="store_true", help="Loop playback until Ctrl+C.")
@@ -203,15 +203,19 @@ def _find_body_index(robot, preferred_name: str) -> int | None:
 
 
 def main():
-    checkpoint_path = _resolve_checkpoint_path(args_cli.checkpoint)
-    print(f"Resolved checkpoint path: {checkpoint_path}", flush=True)
+    checkpoint_path = None
+    if args_cli.mode != "motion":
+        if not args_cli.checkpoint or args_cli.checkpoint == "none":
+            raise ValueError("--checkpoint is required in policy mode")
+        checkpoint_path = _resolve_checkpoint_path(args_cli.checkpoint)
+        print(f"Resolved checkpoint path: {checkpoint_path}", flush=True)
     task_spec = gym.spec(args_cli.task)
     env_cfg = copy.deepcopy(task_spec.kwargs["cfg"])
     runner_cfg_entry_point = task_spec.kwargs["rsl_rl_cfg_entry_point"]
 
     env_cfg.scene.num_envs = args_cli.num_envs
     env_cfg.seed = args_cli.seed
-    if hasattr(env_cfg, "log_dir"):
+    if checkpoint_path is not None and hasattr(env_cfg, "log_dir"):
         env_cfg.log_dir = str(checkpoint_path.parent)
 
     print("Creating playback environment...", flush=True)
@@ -250,6 +254,7 @@ def main():
         episode_index = 1
         episode_step = 0
         minimum_distance = float("inf")
+        min_dist_hand_pos: torch.Tensor | None = None
         grasp_count = 0
         release_count = 0
         grasp_distance = GRASP_DISTANCE
@@ -278,22 +283,22 @@ def main():
             "right_elbow_pitch_joint": "right_elbow_joint",
             "left_elbow_roll_joint": "left_wrist_roll_joint",
             "right_elbow_roll_joint": "right_wrist_roll_joint",
-            "left_zero_joint": "left_hand_thumb_0_joint",
-            "left_one_joint": "left_hand_thumb_1_joint",
-            "left_two_joint": "left_hand_thumb_2_joint",
-            "left_three_joint": "left_hand_index_0_joint",
-            "left_four_joint": "left_hand_index_1_joint",
-            "left_five_joint": "left_hand_middle_0_joint",
-            "left_six_joint": "left_hand_middle_1_joint",
-            "right_zero_joint": "right_hand_thumb_0_joint",
-            "right_one_joint": "right_hand_thumb_1_joint",
-            "right_two_joint": "right_hand_thumb_2_joint",
-            "right_three_joint": "right_hand_index_0_joint",
-            "right_four_joint": "right_hand_index_1_joint",
-            "right_five_joint": "right_hand_middle_0_joint",
-            "right_six_joint": "right_hand_middle_1_joint",
+            # G1 finger joint names → HandOver7 source names
+            "left_hand_thumb_0_joint": "left_zero_joint",
+            "left_hand_thumb_1_joint": "left_one_joint",
+            "left_hand_thumb_2_joint": "left_two_joint",
+            "left_hand_index_0_joint": "left_three_joint",
+            "left_hand_index_1_joint": "left_four_joint",
+            "left_hand_middle_0_joint": "left_five_joint",
+            "left_hand_middle_1_joint": "left_six_joint",
+            "right_hand_thumb_0_joint": "right_zero_joint",
+            "right_hand_thumb_1_joint": "right_one_joint",
+            "right_hand_thumb_2_joint": "right_two_joint",
+            "right_hand_index_0_joint": "right_three_joint",
+            "right_hand_index_1_joint": "right_four_joint",
+            "right_hand_middle_0_joint": "right_five_joint",
+            "right_hand_middle_1_joint": "right_six_joint",
         }
-
         mapped_source_indices = torch.full((action_dim,), -1, dtype=torch.long, device=robot.device)
         if source_index_by_name and robot_joint_names:
             mapped = 0
@@ -316,13 +321,6 @@ def main():
             while simulation_app.is_running():
                 t_step_start = time.monotonic()
 
-                frame = motion_buffer[step_index % motion_buffer.shape[0]].to(robot.device)
-                target_joint_pos = default_joint_pos.clone()
-
-                valid = mapped_source_indices >= 0
-                if bool(valid.any().item()):
-                    target_joint_pos[:, valid] = frame[mapped_source_indices[valid]].unsqueeze(0)
-
                 if not grasped and not released and novelty is not None and novelty_initial_pose is not None:
                     novelty.write_root_pose_to_sim(novelty_initial_pose)
                     _write_root_velocity_to_sim(novelty, zero_root_velocity)
@@ -331,7 +329,10 @@ def main():
                     hand_position = robot.data.body_state_w.torch[:, hand_body_index, :3]
                     novelty_position = novelty.data.root_pos_w.torch
                     distance = torch.linalg.norm(hand_position - novelty_position, dim=-1)
-                    minimum_distance = min(minimum_distance, float(distance.min().item()))
+                    current_dist = float(distance.min().item())
+                    if current_dist < minimum_distance:
+                        minimum_distance = current_dist
+                        min_dist_hand_pos = hand_position[0].detach().clone()
                     if step_index % 30 == 0:
                         print(
                             f"  [DISTANCE] step={step_index} | hand-novelty dist={float(distance.min().item()):.4f}m "
@@ -350,17 +351,14 @@ def main():
                             flush=True,
                         )
 
-                if right_finger_indices and grasped:
-                    target_joint_pos[:, right_finger_indices] = FINGER_TARGET_ANGLE
-
                 release_step = int(motion_buffer.shape[0] * release_fraction)
                 pre_release_step = max(0, release_step - 10)
-                if right_finger_indices and grasped and pre_release_step <= step_index < release_step:
-                    target_joint_pos[:, right_finger_indices] = 0.0
 
-                # Motion replay uses absolute trajectory targets. Do not clamp to [-1, 1],
-                # otherwise the 0.05 action scale compresses large arm motions to near-static output.
-                raw_action = (target_joint_pos - default_joint_pos) / action_scale
+                # Zero residual: env's ResidualJointPositionAction drives joints from the motion base.
+                raw_action = torch.zeros_like(default_joint_pos)
+                if right_finger_indices and grasped:
+                    finger_cmd = 0.0 if pre_release_step <= step_index < release_step else FINGER_TARGET_ANGLE / action_scale
+                    raw_action[:, right_finger_indices] = finger_cmd
 
                 with torch.inference_mode():
                     obs, _, terminated, truncated, _ = env.step(raw_action)
@@ -401,15 +399,13 @@ def main():
                 step_index += 1
                 episode_step += 1
                 if step_index % 60 == 0:
-                    max_delta = float((target_joint_pos - default_joint_pos).abs().max().item())
-                    max_action = float(raw_action.abs().max().item())
                     print(
-                        f"  motion replay step {step_index} | max_joint_delta={max_delta:.3f}rad | max_action={max_action:.2f}",
+                        f"  motion replay step {step_index} / {motion_buffer.shape[0]}",
                         flush=True,
                     )
-                # Log per-joint deltas once at startup to identify which joints move
                 if step_index == 60:
-                    deltas = (target_joint_pos - default_joint_pos).abs().squeeze(0)
+                    actual_pos = robot.data.joint_pos[:, :action_dim]
+                    deltas = (actual_pos - default_joint_pos).abs().squeeze(0)
                     print("  [JOINT DELTA SNAPSHOT] top-10 moving joints:", flush=True)
                     top_indices = deltas.argsort(descending=True)[:10]
                     for idx in top_indices:
@@ -424,6 +420,9 @@ def main():
                         flush=True,
                     )
                     if args_cli.loop and (args_cli.max_episodes == 0 or episode_index < args_cli.max_episodes):
+                        if grasp_count == 0 and min_dist_hand_pos is not None and novelty_initial_pose is not None:
+                            novelty_initial_pose[0, :3] = min_dist_hand_pos
+                            print(f"[AUTO-POS] bottle repositioned to hand closest approach: {min_dist_hand_pos.tolist()}", flush=True)
                         obs, _ = env.reset(seed=args_cli.seed)
                         step_index = 0  # restart motion from frame 0
                         episode_index += 1
@@ -432,6 +431,7 @@ def main():
                         released = False
                         grasp_step = None
                         minimum_distance = float("inf")
+                        min_dist_hand_pos = None
                         grasp_count = 0
                         release_count = 0
                         continue

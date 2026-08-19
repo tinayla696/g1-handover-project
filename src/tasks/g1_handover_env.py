@@ -297,20 +297,21 @@ _HANDOVER7_ALIAS: dict[str, str] = {
     "right_elbow_pitch_joint": "right_elbow_joint",
     "left_elbow_roll_joint": "left_wrist_roll_joint",
     "right_elbow_roll_joint": "right_wrist_roll_joint",
-    "left_zero_joint": "left_hand_thumb_0_joint",
-    "left_one_joint": "left_hand_thumb_1_joint",
-    "left_two_joint": "left_hand_thumb_2_joint",
-    "left_three_joint": "left_hand_index_0_joint",
-    "left_four_joint": "left_hand_index_1_joint",
-    "left_five_joint": "left_hand_middle_0_joint",
-    "left_six_joint": "left_hand_middle_1_joint",
-    "right_zero_joint": "right_hand_thumb_0_joint",
-    "right_one_joint": "right_hand_thumb_1_joint",
-    "right_two_joint": "right_hand_thumb_2_joint",
-    "right_three_joint": "right_hand_index_0_joint",
-    "right_four_joint": "right_hand_index_1_joint",
-    "right_five_joint": "right_hand_middle_0_joint",
-    "right_six_joint": "right_hand_middle_1_joint",
+    # G1 finger joint names → HandOver7 source names
+    "left_hand_thumb_0_joint": "left_zero_joint",
+    "left_hand_thumb_1_joint": "left_one_joint",
+    "left_hand_thumb_2_joint": "left_two_joint",
+    "left_hand_index_0_joint": "left_three_joint",
+    "left_hand_index_1_joint": "left_four_joint",
+    "left_hand_middle_0_joint": "left_five_joint",
+    "left_hand_middle_1_joint": "left_six_joint",
+    "right_hand_thumb_0_joint": "right_zero_joint",
+    "right_hand_thumb_1_joint": "right_one_joint",
+    "right_hand_thumb_2_joint": "right_two_joint",
+    "right_hand_index_0_joint": "right_three_joint",
+    "right_hand_index_1_joint": "right_four_joint",
+    "right_hand_middle_0_joint": "right_five_joint",
+    "right_hand_middle_1_joint": "right_six_joint",
 }
 
 # Cache: G1 joint index → HandOver7 source column index (-1 = unmapped)
@@ -419,7 +420,7 @@ class ResidualJointPositionAction(mdp.JointPositionAction):
         self._motion_buffer = motion_buffer.to(self.device)
         source_names = MotionBufferManager._joint_names or []
         source_index = {name: index for index, name in enumerate(source_names)}
-        aliases = {"torso_joint": "waist_pitch_joint"}
+        aliases = _HANDOVER7_ALIAS
         self._source_indices = torch.full((self.action_dim,), -1, dtype=torch.long, device=self.device)
         for action_index, joint_name in enumerate(self._joint_names):
             source_name = joint_name if joint_name in source_index else aliases.get(joint_name)
@@ -500,22 +501,6 @@ class G1HandoverSceneCfg(InteractiveSceneCfg):
     # ロボット (Unitree G1)
     robot = G1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
-    # 手渡し用の机（静的）
-    table = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/Table",
-        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.65, 0.0, 0.35), rot=(1.0, 0.0, 0.0, 0.0)),
-        spawn=sim_utils.CuboidCfg(
-            size=(0.8, 0.6, 0.7),
-            rigid_props=RigidBodyPropertiesCfg(kinematic_enabled=True, disable_gravity=True),
-            collision_props=sim_utils.CollisionPropertiesCfg(
-                collision_enabled=True,
-                contact_offset=0.02,
-                rest_offset=0.005,
-            ),
-            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.55, 0.35, 0.2)),
-        ),
-    )
-    
     # ノベルティ（500mlペットボトルを模した円柱）
     novelty = RigidObjectCfg(
         prim_path="{ENV_REGEX_NS}/Novelty",

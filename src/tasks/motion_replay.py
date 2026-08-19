@@ -55,10 +55,20 @@ def _load_csv_motion(csv_path: Path, joint_names: list[str]) -> np.ndarray:
         reader = csv.reader(f)
         header = next(reader, None)
 
-    if not header:
+    has_header = False
+    if header:
+        try:
+            [float(value) for value in header]
+        except ValueError:
+            has_header = True
+
+    if not has_header:
         data = np.loadtxt(csv_path, delimiter=",", dtype=np.float32)
         if data.ndim == 1:
             data = data[None, :]
+        # HandOver7 CSV layout is root position (3), root quaternion (4), then 43 joints.
+        if data.shape[1] >= len(joint_names) + 7:
+            data = data[:, 7:]
         if data.shape[1] < len(joint_names):
             raise ValueError(
                 f"CSV has {data.shape[1]} columns, but robot needs {len(joint_names)} joints."
@@ -69,6 +79,12 @@ def _load_csv_motion(csv_path: Path, joint_names: list[str]) -> np.ndarray:
     rows = np.loadtxt(csv_path, delimiter=",", skiprows=1, dtype=np.float32)
     if rows.ndim == 1:
         rows = rows[None, :]
+
+    if rows.shape[1] >= len(joint_names) + 7 and not any(
+        _normalize_name(column) in {_normalize_name(name) for name in joint_names} for column in header
+    ):
+        rows = rows[:, 7:]
+        return rows[:, : len(joint_names)]
 
     joint_indices: list[int] = []
     missing: list[str] = []
@@ -185,20 +201,21 @@ _HANDOVER7_ALIAS = {
     "right_elbow_pitch_joint": "right_elbow_joint",
     "left_elbow_roll_joint": "left_wrist_roll_joint",
     "right_elbow_roll_joint": "right_wrist_roll_joint",
-    "left_zero_joint": "left_hand_thumb_0_joint",
-    "left_one_joint": "left_hand_thumb_1_joint",
-    "left_two_joint": "left_hand_thumb_2_joint",
-    "left_three_joint": "left_hand_index_0_joint",
-    "left_four_joint": "left_hand_index_1_joint",
-    "left_five_joint": "left_hand_middle_0_joint",
-    "left_six_joint": "left_hand_middle_1_joint",
-    "right_zero_joint": "right_hand_thumb_0_joint",
-    "right_one_joint": "right_hand_thumb_1_joint",
-    "right_two_joint": "right_hand_thumb_2_joint",
-    "right_three_joint": "right_hand_index_0_joint",
-    "right_four_joint": "right_hand_index_1_joint",
-    "right_five_joint": "right_hand_middle_0_joint",
-    "right_six_joint": "right_hand_middle_1_joint",
+    # G1 finger joint names → HandOver7 source names
+    "left_hand_thumb_0_joint": "left_zero_joint",
+    "left_hand_thumb_1_joint": "left_one_joint",
+    "left_hand_thumb_2_joint": "left_two_joint",
+    "left_hand_index_0_joint": "left_three_joint",
+    "left_hand_index_1_joint": "left_four_joint",
+    "left_hand_middle_0_joint": "left_five_joint",
+    "left_hand_middle_1_joint": "left_six_joint",
+    "right_hand_thumb_0_joint": "right_zero_joint",
+    "right_hand_thumb_1_joint": "right_one_joint",
+    "right_hand_thumb_2_joint": "right_two_joint",
+    "right_hand_index_0_joint": "right_three_joint",
+    "right_hand_index_1_joint": "right_four_joint",
+    "right_hand_middle_0_joint": "right_five_joint",
+    "right_hand_middle_1_joint": "right_six_joint",
 }
 
 
@@ -265,6 +282,11 @@ def main():
     else:
         raw_frames = None
 
+    csv_path = motion_dir / args_cli.csv_file
+    if (args_cli.source == "csv" or (args_cli.source == "auto" and csv_path.exists())) and csv_path.exists():
+        raw_frames = _load_csv_motion(csv_path, robot_joint_names)
+        print(f"Using CSV motion source: {csv_path}", flush=True)
+
     if raw_frames is not None and motion_joint_names is not None:
         # Name-based mapping via alias table
         frames_tensor = _build_mapped_frame(motion_joint_names, robot_joint_names, torch.from_numpy(default_joint_pos), raw_frames, device)
@@ -278,6 +300,12 @@ def main():
         frames = frames[: args_cli.max_frames]
 
     print(f"Loaded {frames.shape[0]} frames for {frames.shape[1]} joints.", flush=True)
+
+    # Apply frame zero before the first simulation step so reset starts at the attention pose.
+    first_frame = torch.tensor(frames[0], dtype=torch.float32, device=device).unsqueeze(0)
+    _write_joint_positions(robot, first_frame)
+    env_unwrapped.scene.write_data_to_sim()
+    print(f"Applied motion frame 0/{frames.shape[0] - 1} before stepping.", flush=True)
 
     dt = 1.0 / max(args_cli.fps, 1e-6)
 
