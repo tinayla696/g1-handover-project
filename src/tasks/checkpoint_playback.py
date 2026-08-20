@@ -17,6 +17,7 @@ GRASP_DISTANCE = float(os.getenv("GRASP_DISTANCE", "0.08"))
 FINGER_TARGET_ANGLE = float(os.getenv("FINGER_TARGET_ANGLE", "1.3"))
 ATTACH_OFFSET = (0.0, 0.02, -0.01)
 RELEASE_FRACTION = float(os.getenv("RELEASE_FRACTION", "0.90"))
+HANDOVER_RELEASE_STEP = int(os.getenv("HANDOVER_RELEASE_STEP", "0"))  # 0 = use RELEASE_FRACTION
 
 parser = argparse.ArgumentParser(description="Play back a trained G1 Handover checkpoint.")
 parser.add_argument("--task", type=str, default="G1-Handover-v0", help="Registered gym task name.")
@@ -316,6 +317,18 @@ def main():
                 flush=True,
             )
 
+        if HANDOVER_RELEASE_STEP > 0:
+            release_step = min(HANDOVER_RELEASE_STEP, motion_buffer.shape[0] - 1)
+        else:
+            release_step = int(motion_buffer.shape[0] * release_fraction)
+        pre_release_step = max(0, release_step - 10)
+        print(f"Fraction-based release fallback: step {release_step} / {motion_buffer.shape[0]}", flush=True)
+
+        # Persists across episodes; updated at episode end from simulated peak hand-X.
+        detected_release_step: int = 0
+        episode_peak_hand_x: float = float("-inf")
+        episode_peak_step: int = 0
+
         step_index = 0
         try:
             while simulation_app.is_running():
@@ -351,13 +364,20 @@ def main():
                             flush=True,
                         )
 
-                release_step = int(motion_buffer.shape[0] * release_fraction)
-                pre_release_step = max(0, release_step - 10)
+                # Track peak forward (X) position of the hand every step for release timing.
+                if hand_body_index is not None:
+                    _hx = float(robot.data.body_state_w.torch[:, hand_body_index, 0].item())
+                    if _hx > episode_peak_hand_x:
+                        episode_peak_hand_x = _hx
+                        episode_peak_step = step_index
 
                 # Zero residual: env's ResidualJointPositionAction drives joints from the motion base.
+                # Use detected peak step from previous episode; fall back to fraction-based release_step.
+                effective_release = detected_release_step if detected_release_step > 0 else release_step
+                pre_release = max(0, effective_release - 10)
                 raw_action = torch.zeros_like(default_joint_pos)
                 if right_finger_indices and grasped:
-                    finger_cmd = 0.0 if pre_release_step <= step_index < release_step else FINGER_TARGET_ANGLE / action_scale
+                    finger_cmd = 0.0 if pre_release <= step_index < effective_release else FINGER_TARGET_ANGLE / action_scale
                     raw_action[:, right_finger_indices] = finger_cmd
 
                 with torch.inference_mode():
@@ -379,14 +399,18 @@ def main():
                     novelty.write_root_pose_to_sim(novelty_pose_buffer)
                     _write_root_velocity_to_sim(novelty, zero_root_velocity)
 
-                if grasped and grasp_step is not None and step_index >= max(release_step, grasp_step + 30):
+                if grasped and grasp_step is not None and step_index >= max(effective_release, grasp_step + 10):
                     if novelty is not None and hand_body_index is not None:
                         hand_velocity = robot.data.body_state_w.torch[:, hand_body_index, 7:13]
                         _write_root_velocity_to_sim(novelty, hand_velocity)
                     grasped = False
                     released = True
                     release_count += 1
-                    print(f"[RELEASE] step={step_index} handover phase reached; releasing novelty.", flush=True)
+                    print(
+                        f"[RELEASE] step={step_index} peak_step={episode_peak_step} "
+                        f"hand_x={episode_peak_hand_x:.3f}m; forward apex reached.",
+                        flush=True,
+                    )
 
                 # Explicit render keeps the DCV desktop window responsive.
                 _safe_render(env)
@@ -412,11 +436,18 @@ def main():
                         jname = robot_joint_names[int(idx)] if int(idx) < len(robot_joint_names) else f"joint_{idx}"
                         print(f"    {jname}: {float(deltas[idx]):.4f} rad", flush=True)
 
+                # Force episode end when the motion buffer is exhausted (enables looping).
+                if step_index >= motion_buffer.shape[0]:
+                    truncated = torch.ones_like(truncated)
+
                 if bool((terminated | truncated).any().item()):
+                    # Save detected peak step so next episode releases at the forward apex.
+                    detected_release_step = episode_peak_step
                     reason = "timeout" if bool(truncated.any().item()) else "fall"
                     print(
                         f"[METRIC] episode={episode_index} reason={reason} steps={episode_step} "
-                        f"min_distance={minimum_distance:.4f}m grasp={grasp_count} release={release_count}",
+                        f"min_distance={minimum_distance:.4f}m grasp={grasp_count} release={release_count} "
+                        f"peak_reach_step={detected_release_step} peak_hand_x={episode_peak_hand_x:.3f}m",
                         flush=True,
                     )
                     if args_cli.loop and (args_cli.max_episodes == 0 or episode_index < args_cli.max_episodes):
@@ -425,8 +456,13 @@ def main():
                             print(f"[AUTO-POS] bottle repositioned to hand closest approach: {min_dist_hand_pos.tolist()}", flush=True)
                         obs, _ = env.reset(seed=args_cli.seed)
                         step_index = 0  # restart motion from frame 0
+                        # Refresh bottle pose from the env's reset state for next episode.
+                        if novelty is not None:
+                            novelty_initial_pose = novelty.data.root_state_w.torch[:, :7].clone()
                         episode_index += 1
                         episode_step = 0
+                        episode_peak_hand_x = float("-inf")
+                        episode_peak_step = 0
                         grasped = False
                         released = False
                         grasp_step = None
